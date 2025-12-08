@@ -1,0 +1,30 @@
+{
+  "name": "sistema-pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Complete Point of Sale system with multi-provider payments",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "start": "cd backend && npm run start",
+    "migrate": "cd backend && npm run migrate",
+    "migrate:up": "cd backend && npm run migrate:up",
+    "migrate:down": "cd backend && npm run migrate:down",
+    "migrate:reset": "cd backend && npm run migrate:reset",
+    "seed": "cd backend && npm run seed",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "setup": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ..",
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:frontend": "cd frontend && npm run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

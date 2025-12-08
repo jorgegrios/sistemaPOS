@@ -1,33 +1,187 @@
-# Quick Start Guide - sistemaPOS Backend
+# 🚀 Quick Start Guide - Sistema POS
 
-## 1️⃣ Prerequisites
+## Prerequisites
 
-- Node.js 20+
+- Node.js 20+ 
 - Docker & Docker Compose
-- PostgreSQL client (psql) - optional, included with Docker
-- Stripe, Square, or Mercado Pago account with API credentials
+- PostgreSQL 16 (via Docker)
+- Redis 7 (via Docker)
 
-## 2️⃣ One-Command Setup
+## Installation
 
+### 1. Clone the repository
 ```bash
-cd /Users/juang/Documents/sistemaPOS/backend
-chmod +x ../setup.sh && ../setup.sh
+git clone <repo-url>
+cd sistemaPOS
 ```
 
-This script will:
-- ✅ Copy `.env.example` to `.env`
-- ✅ Install npm dependencies
-- ✅ Build TypeScript
-- ✅ Check PostgreSQL & Redis installation
+### 2. Setup all dependencies
+```bash
+npm run setup
+```
 
-## 3️⃣ Start Services
+This will install:
+- Root dependencies (concurrently)
+- Backend dependencies (Express, TypeScript, pg, etc)
+- Frontend dependencies (React, Vite, React Router, etc)
+
+## Running the Application (3 Steps)
+
+### Step 1: Start Docker
+```bash
+npm run docker:up
+```
+
+This starts PostgreSQL and Redis containers.
+
+### Step 2: Setup Database
+```bash
+npm run migrate:up      # Run migrations
+npm run seed            # Seed test data
+```
+
+### Step 3: Start Dev Servers
+```bash
+npm run dev             # Starts both backend and frontend
+```
+
+✅ You're done! Open:
+- **Frontend:** http://localhost:5173
+- **Backend:** http://localhost:3000
+- **API Docs:** http://localhost:3000/api/docs
+
+## Login with Test Credentials
+
+Use any of these accounts (password = password_<role>):
+
+```
+Email: waiter@testrestaurant.com
+Password: password_waiter
+
+Email: cashier@testrestaurant.com  
+Password: password_cashier
+
+Email: manager@testrestaurant.com
+Password: password_manager
+
+Email: admin@testrestaurant.com
+Password: password_admin
+```
+
+## Alternative: Run Separately
+
+If you prefer running backend and frontend in separate terminals:
 
 ```bash
-# From project root
-docker-compose up -d
+# Terminal 1: Backend
+cd backend
+npm run dev
 
-# Verify services running
-docker-compose ps
+# Terminal 2: Frontend
+cd frontend
+npm run dev
+```
+
+## Useful Commands
+
+```bash
+# Docker
+npm run docker:up       # Start containers
+npm run docker:down     # Stop containers
+npm run docker:logs     # View logs
+
+# Database
+npm run migrate:up      # Apply migrations
+npm run migrate:down    # Rollback migrations
+npm run migrate:reset   # Reset database
+npm run seed            # Seed test data
+
+# Development
+npm run dev             # Both backend + frontend
+npm run dev:backend     # Just backend
+npm run dev:frontend    # Just frontend
+
+# Building
+npm run build           # Build both
+npm run build:backend   # Just backend
+npm run build:frontend  # Just frontend
+```
+
+## Project Structure
+
+```
+sistemaPOS/
+├── backend/             # Node.js + Express API
+│   ├── src/
+│   │   ├── routes/      # API endpoints
+│   │   ├── services/    # Business logic
+│   │   └── index.ts
+│   ├── migrations/      # Database migrations
+│   └── scripts/
+│
+├── frontend/            # React 18 + Vite + PWA
+│   ├── src/
+│   │   ├── pages/       # Page components
+│   │   ├── components/  # UI components
+│   │   └── services/    # API services
+│   └── public/
+│
+└── docs/                # Documentation
+```
+
+## Features
+
+✅ **Full Backend API**
+  - Multi-provider payments (Stripe, Square, Mercado Pago, PayPal)
+  - Order & menu management
+  - JWT authentication with 4 roles
+  - Real-time updates via Socket.io
+
+✅ **Modern Frontend (React PWA)**
+  - Touch-friendly POS interface
+  - Order creation & management
+  - Menu browsing
+  - Payment processing
+  - Installable as web app
+
+✅ **Developer Experience**
+  - Swagger UI for API docs
+  - TypeScript for type safety
+  - Docker Compose for quick setup
+  - Database migrations
+
+## Troubleshooting
+
+**Q: "Cannot connect to database"**
+A: Run `npm run docker:up` to start PostgreSQL
+
+**Q: "Port 3000 already in use"**  
+A: Kill process with `lsof -i :3000` then `kill -9 <PID>`
+
+**Q: "npm: command not found"**
+A: Install Node.js from https://nodejs.org
+
+**Q: Frontend can't connect to API**
+A: Make sure backend is running and check `VITE_API_URL` in frontend/.env
+
+## API Documentation
+
+Interactive API docs available at:
+**http://localhost:3000/api/docs**
+
+All 25+ endpoints documented with examples and try-it-out functionality.
+
+## Next Steps
+
+1. ✅ Backend API is fully functional
+2. ✅ Frontend UI is ready
+3. Create more orders and payments
+4. Customize database seed data
+5. Deploy to production
+
+---
+
+**Everything set up? Start creating orders!** 🎉
 ```
 
 Expected output:
