@@ -5,11 +5,13 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import swaggerUi from 'swagger-ui-express';
 import paymentsRouter from './routes/payments';
 import ordersRouter from './routes/orders';
 import menusRouter from './routes/menus';
 import webhooksRouter from './routes/webhooks';
 import authRouter, { verifyToken } from './routes/auth';
+import { swaggerSpec } from './swagger';
 
 dotenv.config();
 
@@ -22,6 +24,24 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
+
+// Swagger UI documentation
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  swaggerOptions: {
+    persistAuthorization: true,
+    tryItOutEnabled: true,
+    urls: [
+      {
+        url: 'http://localhost:3000/api/docs.json',
+        name: 'Local Development'
+      }
+    ]
+  },
+  customCss: '.swagger-ui .topbar { display: none }'
+}));
+
+// Swagger spec JSON endpoint
+app.get('/api/docs.json', (_, res) => res.json(swaggerSpec));
 
 // Health check (no auth required)
 app.get('/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
@@ -62,6 +82,7 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`✅ Backend listening on http://localhost:${PORT}`);
-  console.log(`📚 Health check: http://localhost:${PORT}/health`);
+  console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
+  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
   console.log(`🔐 Auth: POST http://localhost:${PORT}/api/v1/auth/login`);
 });

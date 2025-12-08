@@ -43,11 +43,13 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const http_1 = __importDefault(require("http"));
 const socket_io_1 = require("socket.io");
+const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const payments_1 = __importDefault(require("./routes/payments"));
 const orders_1 = __importDefault(require("./routes/orders"));
 const menus_1 = __importDefault(require("./routes/menus"));
 const webhooks_1 = __importDefault(require("./routes/webhooks"));
 const auth_1 = __importStar(require("./routes/auth"));
+const swagger_1 = require("./swagger");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
@@ -57,6 +59,22 @@ app.use((0, helmet_1.default)());
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
+// Swagger UI documentation
+app.use('/api/docs', swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_1.swaggerSpec, {
+    swaggerOptions: {
+        persistAuthorization: true,
+        tryItOutEnabled: true,
+        urls: [
+            {
+                url: 'http://localhost:3000/api/docs.json',
+                name: 'Local Development'
+            }
+        ]
+    },
+    customCss: '.swagger-ui .topbar { display: none }'
+}));
+// Swagger spec JSON endpoint
+app.get('/api/docs.json', (_, res) => res.json(swagger_1.swaggerSpec));
 // Health check (no auth required)
 app.get('/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
 // Authentication routes (no auth required for login)
@@ -88,6 +106,7 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`✅ Backend listening on http://localhost:${PORT}`);
-    console.log(`📚 Health check: http://localhost:${PORT}/health`);
+    console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
     console.log(`🔐 Auth: POST http://localhost:${PORT}/api/v1/auth/login`);
 });
