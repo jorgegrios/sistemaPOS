@@ -1,0 +1,14 @@
+# Placeholder for integration tests using Playwright or Cypress
+# Define test scenarios: successful card, declined card, webhook duplicate, mixed payment
+
+scenarios:
+  - name: card_success
+    steps:
+      - create_order
+      - process_payment_card
+      - assert_status_paid
+  - name: card_declined
+    steps:
+      - create_order
+      - process_payment_card_declined
+      - assert_error
