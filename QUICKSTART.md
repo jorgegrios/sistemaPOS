@@ -82,6 +82,63 @@ cd frontend
 npm run dev
 ```
 
+## Frontend — Desarrollo y build
+
+La carpeta `frontend` contiene la aplicación React (Vite + TypeScript). Aquí tienes pasos rápidos y notas útiles para trabajar en el frontend:
+
+- Repositorio: `frontend/`
+- Puerto por defecto (dev): 5173
+
+1) Instalar dependencias
+
+```bash
+cd frontend
+npm install        # o npm ci para instalaciones reproducibles
+```
+
+2) Variables de entorno
+
+Existe un archivo de ejemplo `frontend/.env.example`. Por defecto contiene:
+
+```
+VITE_API_URL=http://localhost:3000/api/v1
+VITE_APP_NAME=Sistema POS
+VITE_ENABLE_PWA=true
+```
+
+En modo desarrollo el `vite.config.ts` ya está configurado con un proxy para `'/api'` hacia `http://localhost:3000`, por lo que las llamadas a `/api/*` desde el navegador serán reenviadas al backend local sin necesidad de cambiar `VITE_API_URL`. Si ejecutas backend en otra URL o puerto, actualiza `VITE_API_URL` en `frontend/.env` o copia `.env.example` → `.env` y modifica esa variable.
+
+3) Ejecutar en desarrollo
+
+```bash
+npm run dev
+# Abre: http://localhost:5173
+```
+
+4) Build de producción y vista previa
+
+```bash
+npm run build        # Genera /dist
+npm run preview      # Levanta un servidor local para revisar el build
+```
+
+Para servir el build en producción puedes usar un servidor estático o integrar los archivos de `dist/` dentro del servicio que prefieras.
+
+5) Lint / Type-check
+
+```bash
+npm run lint
+npm run type-check
+```
+
+6) Notas sobre APIs y pagos
+
+- El frontend usa Axios y el proxy de Vite para comunicarse con el backend en desarrollo.
+- Las claves y secretos de proveedores (Stripe, etc.) nunca deben guardarse en código cliente; sigue las instrucciones del backend para configurar credenciales en `backend/.env`.
+
+Si quieres que automatice la instalación y arranque del frontend en tu máquina (comandos exactos para `npm run setup` o scripts de mono-repo), dímelo y lo añado aquí.
+
+
 ## Useful Commands
 
 ```bash

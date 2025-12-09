@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/auth-context';
 import { menuService, MenuItem } from '../services/menu-service';
-import { orderService, Order } from '../services/order-service';
+import { orderService } from '../services/order-service';
 
 interface CartItem extends MenuItem {
   cartQuantity: number;

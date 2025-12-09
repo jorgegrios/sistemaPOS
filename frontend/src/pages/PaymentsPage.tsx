@@ -5,13 +5,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/auth-context';
-import { paymentService, Payment } from '../services/payment-service';
+import { Payment } from '../services/payment-service';
 
 export const PaymentsPage: React.FC = () => {
   const { user } = useAuth();
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [payments, _setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, _setError] = useState<string | null>(null);
 
   useEffect(() => {
     // TODO: Implement getPayments endpoint in backend
