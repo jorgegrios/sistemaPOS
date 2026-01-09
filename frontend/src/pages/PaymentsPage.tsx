@@ -5,18 +5,31 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/auth-context';
-import { Payment } from '../services/payment-service';
+import { Payment, paymentService } from '../services/payment-service';
 
 export const PaymentsPage: React.FC = () => {
   const { user } = useAuth();
-  const [payments, _setPayments] = useState<Payment[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, _setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // TODO: Implement getPayments endpoint in backend
-    // For now, show placeholder
-    setLoading(false);
+    const loadPayments = async () => {
+      try {
+        setLoading(true);
+        const result = await paymentService.getPayments({
+          limit: 100
+        });
+        setPayments(result.payments);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to load payments';
+        setError(errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPayments();
   }, [user?.restaurantId]);
 
   const getStatusBadge = (status: string) => {
@@ -45,7 +58,7 @@ export const PaymentsPage: React.FC = () => {
       {/* Error Message */}
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-red-700 text-sm">{error}</p>
+          <p className="text-red-700 text-sm">Failed to load payments: {error}</p>
         </div>
       )}
 
@@ -73,19 +86,26 @@ export const PaymentsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {payments.map((payment) => (
-                  <tr key={payment.id} className="border-b border-gray-200 hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm font-medium text-gray-800">{payment.transactionId}</td>
-                    <td className="px-6 py-4 text-sm font-semibold text-gray-800">
-                      {payment.currency} {(payment.amount / 100).toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600 capitalize">{payment.provider}</td>
-                    <td className="px-6 py-4 text-sm">{getStatusBadge(payment.status)}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {new Date(payment.createdAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
+                {payments.map((payment) => {
+                  const transactionId = payment.transactionId || payment.transaction_id || payment.id;
+                  const provider = payment.provider || payment.payment_provider || 'unknown';
+                  const createdAt = payment.createdAt || payment.created_at || '';
+                  const amount = typeof payment.amount === 'number' ? payment.amount : parseFloat(payment.amount as any);
+                  
+                  return (
+                    <tr key={payment.id} className="border-b border-gray-200 hover:bg-gray-50">
+                      <td className="px-6 py-4 text-sm font-medium text-gray-800">{transactionId}</td>
+                      <td className="px-6 py-4 text-sm font-semibold text-gray-800">
+                        {payment.currency} {(amount / 100).toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600 capitalize">{provider}</td>
+                      <td className="px-6 py-4 text-sm">{getStatusBadge(payment.status)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {createdAt ? new Date(createdAt).toLocaleDateString() : 'N/A'}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

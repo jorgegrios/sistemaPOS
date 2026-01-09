@@ -77,21 +77,46 @@ class MenuService {
    * Create a new menu item
    */
   async createMenuItem(data: CreateMenuItemRequest): Promise<MenuItem> {
-    return apiClient.post<MenuItem>('/menus', data);
+    return apiClient.post<MenuItem>('/menus/items', data);
+  }
+
+  /**
+   * Create a new menu category
+   */
+  async createCategory(menuId: string, name: string, displayOrder?: number): Promise<MenuCategory> {
+    return apiClient.post<MenuCategory>('/menus/categories', {
+      menuId,
+      name,
+      displayOrder: displayOrder || 0
+    });
+  }
+
+  /**
+   * Update a menu category
+   */
+  async updateCategory(id: string, data: { name?: string; displayOrder?: number }): Promise<MenuCategory> {
+    return apiClient.put<MenuCategory>(`/menus/categories/${id}`, data);
+  }
+
+  /**
+   * Delete a menu category
+   */
+  async deleteCategory(id: string): Promise<void> {
+    await apiClient.delete(`/menus/categories/${id}`);
   }
 
   /**
    * Update a menu item
    */
   async updateMenuItem(id: string, data: UpdateMenuItemRequest): Promise<MenuItem> {
-    return apiClient.put<MenuItem>(`/menus/${id}`, data);
+    return apiClient.put<MenuItem>(`/menus/items/${id}`, data);
   }
 
   /**
    * Delete a menu item
    */
   async deleteMenuItem(id: string): Promise<void> {
-    await apiClient.delete(`/menus/${id}`);
+    await apiClient.delete(`/menus/items/${id}`);
   }
 
   /**

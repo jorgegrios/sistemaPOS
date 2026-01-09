@@ -9,21 +9,29 @@ export type PaymentProvider = 'stripe' | 'square' | 'mercado_pago' | 'paypal';
 
 export interface Payment {
   id: string;
-  transactionId: string;
-  orderId: string;
+  transaction_id?: string;
+  transactionId?: string;
+  order_id?: string;
+  orderId?: string;
+  payment_provider?: string;
   provider: PaymentProvider;
   amount: number;
   currency: string;
   status: 'pending' | 'succeeded' | 'failed' | 'refunded';
-  createdAt: string;
+  created_at?: string;
+  createdAt?: string;
 }
 
 export interface ProcessPaymentRequest {
-  orderId: string;
+  orderId?: string; // Optional: can be undefined for general payments
   provider: PaymentProvider;
   amount: number;
   currency?: string;
+  method?: 'card' | 'cash' | 'qr' | 'wallet';
+  paymentMethodId?: string;
   token?: string;
+  idempotencyKey?: string;
+  tip?: number;
   metadata?: Record<string, any>;
 }
 
@@ -37,7 +45,19 @@ class PaymentService {
    * Process a payment through a provider
    */
   async processPayment(data: ProcessPaymentRequest): Promise<Payment> {
-    return apiClient.post<Payment>('/payments/process', data);
+    // Map frontend format to backend format
+    const backendData = {
+      orderId: data.orderId,
+      amount: data.amount,
+      currency: data.currency || 'USD',
+      method: data.method || 'card',
+      provider: data.provider,
+      paymentMethodId: data.paymentMethodId || data.token,
+      idempotencyKey: data.idempotencyKey,
+      tip: data.tip,
+      metadata: data.metadata
+    };
+    return apiClient.post<Payment>('/payments/process', backendData);
   }
 
   /**
@@ -131,6 +151,24 @@ class PaymentService {
   }
 
   /**
+   * Get all payments with optional filters
+   */
+  async getPayments(params?: {
+    orderId?: string;
+    status?: 'pending' | 'succeeded' | 'failed' | 'refunded';
+    provider?: PaymentProvider;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ payments: Payment[]; total: number; limit: number; offset: number }> {
+    const queryString = params
+      ? '?' + new URLSearchParams(params as Record<string, string>).toString()
+      : '';
+    return apiClient.get<{ payments: Payment[]; total: number; limit: number; offset: number }>(
+      `/payments${queryString}`
+    );
+  }
+
+  /**
    * Check if payment succeeded
    */
   isPaymentSuccessful(payment: Payment): boolean {
@@ -145,6 +183,15 @@ class PaymentService {
       style: 'currency',
       currency
     }).format(amount / 100);
+  }
+
+  /**
+   * Get Stripe configuration (publishable key)
+   */
+  async getStripeConfig(): Promise<{ publishableKey: string; enabled: boolean }> {
+    return apiClient.get<{ publishableKey: string; enabled: boolean }>(
+      '/payments/stripe/config'
+    );
   }
 }
 

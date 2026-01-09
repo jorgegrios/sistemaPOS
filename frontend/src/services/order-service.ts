@@ -12,23 +12,27 @@ export interface OrderItem {
   price: number;
   quantity: number;
   description?: string;
+  notes?: string;
 }
 
 export interface Order {
   id: string;
-  restaurantId: string;
+  restaurantId?: string;
   orderNumber: string;
   tableId: string;
   waiterId: string;
   status: 'pending' | 'completed' | 'cancelled';
+  paymentStatus?: 'pending' | 'paid' | 'failed';
   subtotal: number;
   tax: number;
   discount: number;
   tip: number;
   total: number;
-  items: OrderItem[];
+  checkRequestedAt?: string | null; // When check was requested
+  items?: OrderItem[];
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
+  paidAt?: string;
 }
 
 export interface CreateOrderRequest {
@@ -37,7 +41,10 @@ export interface CreateOrderRequest {
   waiterId: string;
   items?: Array<{
     menuItemId: string;
+    name: string;
+    price: number;
     quantity: number;
+    notes?: string;
   }>;
 }
 
@@ -122,6 +129,20 @@ class OrderService {
    */
   async applyDiscount(orderId: string, discountAmount: number): Promise<Order> {
     return this.updateOrder(orderId, { discount: discountAmount });
+  }
+
+  /**
+   * Request check (bill) for an order - generates customer receipt
+   */
+  async requestCheck(orderId: string): Promise<{ ok: boolean; message: string; order: { id: string; orderNumber: string; checkRequestedAt: string } }> {
+    return apiClient.post(`/orders/${orderId}/request-check`);
+  }
+
+  /**
+   * Cancel check request (reset check_requested_at) - for cashier
+   */
+  async cancelCheck(orderId: string): Promise<{ ok: boolean; message: string; order: { id: string; orderNumber: string; checkRequestedAt: null } }> {
+    return apiClient.post(`/orders/${orderId}/cancel-check`);
   }
 }
 

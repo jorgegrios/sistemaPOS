@@ -1,0 +1,12 @@
+# frontend/.dockerignore
+node_modules
+npm-debug.log
+dist
+.env
+.env.*
+!.env.production.example
+.git
+.gitignore
+.DS_Store
+*.log
+coverage/
