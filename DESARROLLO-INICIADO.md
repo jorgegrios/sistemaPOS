@@ -186,3 +186,4 @@ El frontend maneja tanto nombres en snake_case (del backend) como camelCase (pre
 
 
 
+

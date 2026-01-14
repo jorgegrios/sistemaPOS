@@ -343,3 +343,4 @@ pm2 logs sistema-pos-backend
 **✅ ¡Listo! Tu backend debería estar corriendo en el servidor.**
 
 
+

@@ -255,3 +255,4 @@ export const MyPage: React.FC = () => {
 
 **¡El sistema está completamente optimizado para tablets con giroscopio!** 🎉
 
+

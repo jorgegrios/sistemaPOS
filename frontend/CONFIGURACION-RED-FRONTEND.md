@@ -234,3 +234,4 @@ Abre la consola del navegador (F12) y verifica:
 
 **¡El frontend está listo para funcionar desde cualquier dispositivo en la red!** 🎉
 
+

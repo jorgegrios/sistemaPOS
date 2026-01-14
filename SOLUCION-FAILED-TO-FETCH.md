@@ -297,3 +297,4 @@ http://TU_IP:5173
 - La URL que está intentando usar el frontend
 - Si puedes acceder a `http://TU_IP:3000/health` desde el otro dispositivo
 
+

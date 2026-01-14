@@ -223,3 +223,4 @@ export const CashRegisterSummaryModal: React.FC<CashRegisterSummaryModalProps> =
   );
 };
 
+

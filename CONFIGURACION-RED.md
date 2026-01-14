@@ -224,3 +224,4 @@ VITE_API_URL=http://localhost:3000/api/v1
 
 **¡El backend está listo para aceptar conexiones de red!** 🎉
 
+

@@ -100,3 +100,4 @@ Requiere autenticación JWT (header `Authorization: Bearer <token>`)
 
 
 
+

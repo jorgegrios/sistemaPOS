@@ -50,3 +50,4 @@ El error "Stripe is not configured" (503) es normal si no has configurado Stripe
 
 
 
+
