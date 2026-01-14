@@ -14,3 +14,12 @@ docker-compose.override.yml
 
 # Tests/build
 coverage/
+# .gitignore - AGREGAR
+.env
+.env.*
+!.env.production.example
+docker-compose.override.yml
+secrets/
+*.pem
+*.key
+*.crt

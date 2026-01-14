@@ -7,6 +7,8 @@ import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/auth-context';
 import { menuService, Menu, MenuCategory, MenuItem } from '../services/menu-service';
+import { IngredientSelectorModal } from '../components/IngredientSelectorModal';
+import { getApiBaseUrl } from '../utils/api-config';
 
 export const ManageMenuPage: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
@@ -27,6 +29,8 @@ export const ManageMenuPage: React.FC = () => {
     imageUrl: '',
     available: true
   });
+  const [showIngredientModal, setShowIngredientModal] = useState(false);
+  const [selectedIngredients, setSelectedIngredients] = useState<string[]>([]);
 
   useEffect(() => {
     if (user?.restaurantId) {
@@ -119,6 +123,15 @@ export const ManageMenuPage: React.FC = () => {
     }
 
     try {
+      // Construir metadata con ingredientes e imagen
+      const metadata: Record<string, any> = {};
+      if (itemForm.imageUrl) {
+        metadata.imageUrl = itemForm.imageUrl;
+      }
+      if (selectedIngredients.length > 0) {
+        metadata.ingredients = selectedIngredients;
+      }
+
       await menuService.createMenuItem({
         menuId: selectedMenu!.id,
         categoryId: selectedCategory,
@@ -126,17 +139,24 @@ export const ManageMenuPage: React.FC = () => {
         description: itemForm.description || undefined,
         price: parseFloat(itemForm.price),
         available: itemForm.available,
-        metadata: itemForm.imageUrl ? { imageUrl: itemForm.imageUrl } : undefined
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined
       });
 
       toast.success('Item creado correctamente');
       setShowItemModal(false);
       setItemForm({ name: '', description: '', price: '', imageUrl: '', available: true });
+      setSelectedIngredients([]);
       setSelectedCategory(null);
       loadMenuDetail(selectedMenu!.id);
     } catch (error: any) {
       toast.error(error.message || 'Error creating item');
     }
+  };
+
+  const handleIngredientsConfirmed = (ingredients: string[]) => {
+    setSelectedIngredients(ingredients);
+    setShowIngredientModal(false);
+    toast.success(`${ingredients.length} ingredientes seleccionados`);
   };
 
   const handleDeleteItem = async (itemId: string) => {
@@ -160,7 +180,7 @@ export const ManageMenuPage: React.FC = () => {
 
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'}/menus/${user.restaurantId}`,
+        `${getApiBaseUrl()}/menus/${user.restaurantId}`,
         {
           method: 'POST',
           headers: {
@@ -451,8 +471,40 @@ export const ManageMenuPage: React.FC = () => {
                     onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                     rows={3}
-                    placeholder="Descripción del plato..."
+                    placeholder="Ej: Filete de pescado fresco a la plancha con vegetales y arroz"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowIngredientModal(true)}
+                    className="mt-2 w-full px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 active:scale-95 transition flex items-center justify-center gap-2 min-h-[44px]"
+                  >
+                    <span>🤖</span>
+                    <span>Analizar Ingredientes</span>
+                  </button>
+                  {selectedIngredients.length > 0 && (
+                    <div className="mt-2 p-3 bg-green-50 border-2 border-green-300 rounded-lg">
+                      <p className="text-xs font-semibold text-green-800 mb-2">
+                        Ingredientes identificados ({selectedIngredients.length}):
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedIngredients.map((ing, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-1 bg-green-200 text-green-800 rounded text-xs font-medium"
+                          >
+                            {ing}
+                          </span>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowIngredientModal(true)}
+                        className="mt-2 text-xs text-indigo-600 hover:text-indigo-800 font-semibold"
+                      >
+                        Editar ingredientes →
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -504,6 +556,7 @@ export const ManageMenuPage: React.FC = () => {
                   onClick={() => {
                     setShowItemModal(false);
                     setItemForm({ name: '', description: '', price: '', imageUrl: '', available: true });
+                    setSelectedIngredients([]);
                     setSelectedCategory(null);
                   }}
                   className="btn-danger px-6 py-2 rounded-lg btn-touch"
@@ -515,6 +568,16 @@ export const ManageMenuPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Modal de Selección de Ingredientes */}
+      <IngredientSelectorModal
+        isOpen={showIngredientModal}
+        onClose={() => setShowIngredientModal(false)}
+        onConfirm={handleIngredientsConfirmed}
+        initialDescription={itemForm.description}
+        initialIngredients={selectedIngredients}
+        productName={itemForm.name}
+      />
 
       {/* Create Menu Modal */}
       {showMenuModal && (

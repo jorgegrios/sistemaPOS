@@ -25,11 +25,16 @@ export const RoleBasedRedirect: React.FC = () => {
   // Redirect based on role
   if ((user.role as string) === 'cashier') {
     return <Navigate to="/cashier" replace />;
+  } else if ((user.role as string) === 'kitchen') {
+    return <Navigate to="/kitchen" replace />;
+  } else if ((user.role as string) === 'bartender') {
+    return <Navigate to="/bar" replace />;
   } else if (user.role === 'waiter') {
-    return <Navigate to="/orders" replace />;
+    return <Navigate to="/orders/new" replace />;
   } else {
     return <Navigate to="/dashboard" replace />;
   }
 };
+
 
 

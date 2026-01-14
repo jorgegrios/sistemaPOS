@@ -9,7 +9,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'manager' | 'waiter' | 'cashier';
+  role: 'admin' | 'manager' | 'waiter' | 'cashier' | 'kitchen' | 'bartender';
   restaurantId: string;
 }
 
@@ -37,7 +37,7 @@ class AuthService {
    */
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const response = await apiClient.post<LoginResponse>(
-      '/auth/login',
+      '/v1/auth/login',
       credentials,
       { skipAuth: true }
     );
@@ -54,7 +54,7 @@ class AuthService {
    */
   async register(data: RegisterRequest): Promise<LoginResponse> {
     const response = await apiClient.post<LoginResponse>(
-      '/auth/register',
+      '/v1/auth/register',
       data
     );
 
@@ -71,7 +71,7 @@ class AuthService {
   async verifyToken(): Promise<{ valid: boolean; user?: User }> {
     try {
       const response = await apiClient.post<{ valid: boolean; user?: User }>(
-        '/auth/verify',
+        '/v1/auth/verify',
         {}
       );
       return response;
@@ -85,7 +85,7 @@ class AuthService {
    */
   async logout(): Promise<void> {
     try {
-      await apiClient.post('/auth/logout', {});
+      await apiClient.post('/v1/auth/logout', {});
     } finally {
       apiClient.clearToken();
     }

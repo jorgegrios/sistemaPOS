@@ -19,7 +19,7 @@ class TableService {
    * Get all tables
    */
   async getTables(): Promise<Table[]> {
-    const response = await apiClient.get<{ tables: Table[] }>('/tables');
+    const response = await apiClient.get<{ tables: Table[] }>('/v1/tables');
     return response.tables;
   }
 
@@ -27,7 +27,7 @@ class TableService {
    * Get a single table
    */
   async getTable(id: string): Promise<Table> {
-    const response = await apiClient.get<{ table: Table }>(`/tables/${id}`);
+    const response = await apiClient.get<{ table: Table }>(`/v1/tables/${id}`);
     return response.table;
   }
 
@@ -35,7 +35,7 @@ class TableService {
    * Create a new table
    */
   async createTable(tableNumber: string, capacity: number): Promise<Table> {
-    const response = await apiClient.post<{ table: Table }>('/tables', {
+    const response = await apiClient.post<{ table: Table }>('/v1/tables', {
       tableNumber,
       capacity
     });
@@ -46,7 +46,7 @@ class TableService {
    * Update a table
    */
   async updateTable(id: string, data: { tableNumber?: string; capacity?: number; status?: string }): Promise<Table> {
-    const response = await apiClient.put<{ table: Table }>(`/tables/${id}`, data);
+    const response = await apiClient.put<{ table: Table }>(`/v1/tables/${id}`, data);
     return response.table;
   }
 
@@ -54,10 +54,11 @@ class TableService {
    * Delete a table
    */
   async deleteTable(id: string): Promise<void> {
-    await apiClient.delete(`/tables/${id}`);
+    await apiClient.delete(`/v1/tables/${id}`);
   }
 }
 
 export const tableService = new TableService();
+
 
 

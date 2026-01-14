@@ -14,7 +14,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
  */
 
 export interface PaymentRequest {
-  orderId: string;
+  orderId?: string | null; // Optional: can be null for general payments
   amount: number;
   currency: string;
   method: 'card' | 'qr' | 'wallet' | 'cash';
@@ -106,6 +106,16 @@ class PaymentOrchestrator {
     transactionId: string,
     idempotencyKey: string
   ): Promise<PaymentResponse> {
+    // For cash payments, return success immediately (no provider needed)
+    if (req.method === 'cash') {
+      return {
+        transactionId,
+        status: 'succeeded',
+        amount: req.amount,
+        providerTransactionId: `cash-${transactionId}`
+      };
+    }
+
     switch (req.provider) {
       case 'stripe':
         return await this.processStripePayment(req, transactionId, idempotencyKey);
@@ -223,7 +233,7 @@ class PaymentOrchestrator {
     `;
     await pool.query(query, [
       transactionId,
-      req.orderId,
+      req.orderId || null, // Allow null for general payments
       req.method,
       req.provider,
       req.amount,

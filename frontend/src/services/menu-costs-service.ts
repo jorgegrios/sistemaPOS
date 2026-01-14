@@ -53,7 +53,7 @@ class MenuCostsService {
    */
   async getMenuItemIngredients(menuItemId: string): Promise<MenuItemIngredient[]> {
     const response = await apiClient.get<{ ingredients: MenuItemIngredient[] }>(
-      `/menu-costs/items/${menuItemId}/ingredients`
+      `/v1/menu-costs/items/${menuItemId}/ingredients`
     );
     return response.ingredients;
   }
@@ -70,7 +70,7 @@ class MenuCostsService {
     }
   ): Promise<MenuItemIngredient> {
     return apiClient.post<MenuItemIngredient>(
-      `/menu-costs/items/${menuItemId}/ingredients`,
+      `/v1/menu-costs/items/${menuItemId}/ingredients`,
       data
     );
   }
@@ -85,21 +85,21 @@ class MenuCostsService {
       unit: string;
     }
   ): Promise<void> {
-    await apiClient.put(`/menu-costs/ingredients/${id}`, data);
+    await apiClient.put(`/v1/menu-costs/ingredients/${id}`, data);
   }
 
   /**
    * Remove ingredient from menu item
    */
   async removeIngredient(id: string): Promise<void> {
-    await apiClient.delete(`/menu-costs/ingredients/${id}`);
+    await apiClient.delete(`/v1/menu-costs/ingredients/${id}`);
   }
 
   /**
    * Calculate total cost of a menu item
    */
   async calculateMenuItemCost(menuItemId: string): Promise<MenuItemCost> {
-    return apiClient.get<MenuItemCost>(`/menu-costs/items/${menuItemId}/calculate`);
+    return apiClient.get<MenuItemCost>(`/v1/menu-costs/items/${menuItemId}/calculate`);
   }
 
   /**
@@ -107,11 +107,12 @@ class MenuCostsService {
    */
   async getAllMenuItemCosts(): Promise<MenuItemCostSummary[]> {
     const response = await apiClient.get<{ items: MenuItemCostSummary[] }>(
-      '/menu-costs/items'
+      '/v1/menu-costs/items'
     );
     return response.items;
   }
 }
 
 export const menuCostsService = new MenuCostsService();
+
 

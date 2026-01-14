@@ -50,31 +50,32 @@ class UserService {
 
     const query = params.toString();
     const response = await apiClient.get<{ users: UserListItem[] }>(
-      `/auth/users${query ? `?${query}` : ''}`
+      `/v1/auth/users${query ? `?${query}` : ''}`
     );
     return response.users;
   }
 
   async getUser(id: string): Promise<UserListItem> {
-    const response = await apiClient.get<{ user: UserListItem }>(`/auth/users/${id}`);
+    const response = await apiClient.get<{ user: UserListItem }>(`/v1/auth/users/${id}`);
     return response.user;
   }
 
   async createUser(data: CreateUserRequest): Promise<User> {
-    const response = await apiClient.post<User>('/auth/register', data);
+    const response = await apiClient.post<User>('/v1/auth/register', data);
     return response;
   }
 
   async updateUser(id: string, data: UpdateUserRequest): Promise<UserListItem> {
-    const response = await apiClient.put<{ user: UserListItem }>(`/auth/users/${id}`, data);
+    const response = await apiClient.put<{ user: UserListItem }>(`/v1/auth/users/${id}`, data);
     return response.user;
   }
 
   async changePassword(id: string, data: ChangePasswordRequest): Promise<void> {
-    await apiClient.put(`/auth/users/${id}/password`, data);
+    await apiClient.put(`/v1/auth/users/${id}/password`, data);
   }
 }
 
 export const userService = new UserService();
+
 
 

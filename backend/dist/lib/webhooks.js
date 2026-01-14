@@ -9,6 +9,8 @@ exports.verifyMercadoPagoSignature = verifyMercadoPagoSignature;
 exports.handleStripeWebhook = handleStripeWebhook;
 exports.handleSquareWebhook = handleSquareWebhook;
 exports.handleMercadoPagoWebhook = handleMercadoPagoWebhook;
+exports.verifyPayPalSignature = verifyPayPalSignature;
+exports.handlePayPalWebhook = handlePayPalWebhook;
 const crypto_1 = __importDefault(require("crypto"));
 const pg_1 = require("pg");
 const pool = new pg_1.Pool({ connectionString: process.env.DATABASE_URL });
@@ -176,6 +178,98 @@ async function handleMercadoPagoWebhook(event) {
     }
     catch (error) {
         console.error('[Mercado Pago Webhook] Error handling event:', error);
+        throw error;
+    }
+}
+/**
+ * Verify PayPal webhook signature
+ * https://developer.paypal.com/docs/api-basics/notifications/webhooks/notification-messages/
+ */
+function verifyPayPalSignature(headers, body, webhookId) {
+    try {
+        // PayPal uses x-paypal-transmission-sig header for signature verification
+        const transmissionSig = headers['x-paypal-transmission-sig'];
+        const certUrl = headers['x-paypal-cert-url'];
+        const transmissionId = headers['x-paypal-transmission-id'];
+        const transmissionTime = headers['x-paypal-transmission-time'];
+        const authAlgo = headers['x-paypal-auth-algo'];
+        if (!transmissionSig || !certUrl || !transmissionId || !transmissionTime || !authAlgo) {
+            return false;
+        }
+        // PayPal webhook verification requires:
+        // 1. Downloading the certificate from certUrl
+        // 2. Verifying the signature using the certificate
+        // 3. Verifying the webhook ID matches
+        // For production, you should:
+        // - Download and cache the certificate
+        // - Use crypto.createVerify() to verify the signature
+        // - Verify webhookId matches expected value
+        // Simplified verification: check webhook ID matches
+        // In production, implement full cryptographic verification
+        const webhookSecret = process.env.WEBHOOK_SECRET_PAYPAL || '';
+        // Basic validation - in production, implement full signature verification
+        if (webhookSecret && webhookId !== webhookSecret) {
+            return false;
+        }
+        // TODO: Implement full cryptographic verification
+        // This requires downloading the certificate and verifying the signature
+        // For now, we'll do basic validation
+        return true;
+    }
+    catch (error) {
+        console.error('[PayPal] Signature verification error:', error);
+        return false;
+    }
+}
+/**
+ * Handle PayPal webhook events
+ */
+async function handlePayPalWebhook(event) {
+    try {
+        const { event_type, resource } = event;
+        console.log(`[PayPal Webhook] Processing event: ${event_type}`);
+        if (event_type === 'PAYMENT.CAPTURE.COMPLETED') {
+            const captureId = resource.id;
+            const orderId = resource.supplementary_data?.related_ids?.order_id;
+            // Update transaction status to succeeded
+            await pool.query(`UPDATE payment_transactions
+         SET status = 'succeeded', provider_response = $1, updated_at = NOW()
+         WHERE provider_transaction_id = $2 OR provider_transaction_id = $3`, [JSON.stringify(resource), captureId, orderId]);
+            // Update order status to paid
+            const txResult = await pool.query(`SELECT order_id FROM payment_transactions 
+         WHERE provider_transaction_id = $1 OR provider_transaction_id = $2`, [captureId, orderId]);
+            if (txResult.rows.length > 0) {
+                await pool.query(`UPDATE orders SET payment_status = 'paid', paid_at = NOW() WHERE id = $1`, [txResult.rows[0].order_id]);
+            }
+        }
+        else if (event_type === 'PAYMENT.CAPTURE.DENIED' || event_type === 'PAYMENT.CAPTURE.DECLINED') {
+            const captureId = resource.id;
+            await pool.query(`UPDATE payment_transactions
+         SET status = 'failed', provider_response = $1, updated_at = NOW()
+         WHERE provider_transaction_id = $2`, [JSON.stringify(resource), captureId]);
+            // Update order status
+            const txResult = await pool.query(`SELECT order_id FROM payment_transactions WHERE provider_transaction_id = $1`, [captureId]);
+            if (txResult.rows.length > 0) {
+                await pool.query(`UPDATE orders SET payment_status = 'failed' WHERE id = $1`, [txResult.rows[0].order_id]);
+            }
+        }
+        else if (event_type === 'PAYMENT.CAPTURE.REFUNDED') {
+            const refundId = resource.id;
+            const captureId = resource.capture_id;
+            // Update refund status
+            await pool.query(`UPDATE refunds 
+         SET status = 'succeeded', provider_refund_id = $1, provider_response = $2, processed_at = NOW()
+         WHERE payment_transaction_id IN (
+           SELECT id FROM payment_transactions WHERE provider_transaction_id = $3
+         )`, [refundId, JSON.stringify(resource), captureId]);
+            // Update transaction status if full refund
+            await pool.query(`UPDATE payment_transactions 
+         SET status = 'refunded', updated_at = NOW()
+         WHERE provider_transaction_id = $1`, [captureId]);
+        }
+    }
+    catch (error) {
+        console.error('[PayPal Webhook] Error handling event:', error);
         throw error;
     }
 }

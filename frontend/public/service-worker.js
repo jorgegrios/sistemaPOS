@@ -43,9 +43,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip API calls (handle separately if needed)
+  // Skip API calls - always fetch from network and don't cache
   if (event.request.url.includes('/api/')) {
-    event.respondWith(fetch(event.request));
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        // Return a basic response if fetch fails to prevent console errors
+        return new Response('Network error', { status: 503, statusText: 'Service Unavailable' });
+      })
+    );
     return;
   }
 

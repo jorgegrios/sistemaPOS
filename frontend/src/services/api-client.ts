@@ -3,7 +3,11 @@
  * Handles authentication, request/response intercepting, and error handling
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+import { getApiBaseUrl } from '../utils/api-config';
+
+// Usar la función de configuración que detecta automáticamente la IP
+// getApiBaseUrl ya retorna la URL completa con /api/v1, pero algunos endpoints usan /api directamente
+const API_BASE_URL = getApiBaseUrl().replace('/v1', '') || '/api';
 const TOKEN_KEY = 'pos_token';
 const REFRESH_TOKEN_KEY = 'pos_refresh_token';
 

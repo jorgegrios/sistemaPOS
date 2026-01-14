@@ -38,12 +38,21 @@ import { ManageMenuPage } from './pages/ManageMenuPage';
 import { TablesPage } from './pages/TablesPage';
 import { TablePage } from './pages/TablePage';
 import { CashierPage } from './pages/CashierPage';
+import { KitchenPage } from './pages/KitchenPage';
+import { ServedOrdersPage } from './pages/ServedOrdersPage';
+import { BarPage } from './pages/BarPage';
+import { BarServedOrdersPage } from './pages/BarServedOrdersPage';
 import { MenuCostsPage } from './pages/MenuCostsPage';
 import { RoleBasedRedirect } from './components/RoleBasedRedirect';
 
 function App() {
   return (
-    <Router>
+    <Router
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true
+      }}
+    >
       <AuthProvider>
         <StripeProviderWrapper>
           <Routes>
@@ -69,8 +78,42 @@ function App() {
             <Route 
               path="/cashier" 
               element={
-                <RoleProtectedRoute allowedRoles={['cashier']}>
+                <RoleProtectedRoute allowedRoles={['cashier', 'admin']}>
                   <CashierPage />
+                </RoleProtectedRoute>
+              } 
+            />
+            {/* Kitchen View (KDS) - Special layout */}
+            <Route 
+              path="/kitchen" 
+              element={
+                <RoleProtectedRoute allowedRoles={['kitchen', 'admin']}>
+                  <KitchenPage />
+                </RoleProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/kitchen/served" 
+              element={
+                <RoleProtectedRoute allowedRoles={['kitchen', 'admin']}>
+                  <ServedOrdersPage />
+                </RoleProtectedRoute>
+              } 
+            />
+            {/* Bar View - Special layout */}
+            <Route 
+              path="/bar" 
+              element={
+                <RoleProtectedRoute allowedRoles={['bartender', 'admin']}>
+                  <BarPage />
+                </RoleProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/bar/served" 
+              element={
+                <RoleProtectedRoute allowedRoles={['bartender', 'admin']}>
+                  <BarServedOrdersPage />
                 </RoleProtectedRoute>
               } 
             />

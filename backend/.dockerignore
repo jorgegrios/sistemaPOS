@@ -1,0 +1,14 @@
+# backend/.dockerignore
+node_modules
+npm-debug.log
+dist
+.env
+.env.*
+!.env.production.example
+.git
+.gitignore
+.DS_Store
+logs/
+*.log
+coverage/
+.nyc_output/

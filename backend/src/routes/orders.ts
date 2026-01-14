@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import kitchenPrintService from '../services/kitchenPrintService';
+import receiptService from '../services/receiptService';
+import { verifyToken, AuthRequest } from './auth';
 
 const router = Router();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -47,6 +50,14 @@ router.post('/', async (req: Request, res: Response) => {
       );
     }
 
+    // Print kitchen/bar tickets automatically
+    try {
+      await kitchenPrintService.printOrderTickets(orderId);
+    } catch (printError: any) {
+      // Log error but don't fail the order creation
+      console.error('[Orders] Error printing tickets:', printError.message);
+    }
+
     return res.status(201).json({
       id: order.id,
       orderNumber: order.order_number,
@@ -66,43 +77,116 @@ router.post('/', async (req: Request, res: Response) => {
  * GET /api/v1/orders
  * List all orders with filtering
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    const { status, limit = 50, offset = 0 } = req.query;
-
-    let query = 'SELECT * FROM orders';
-    const params: any[] = [];
-
-    if (status) {
-      query += ' WHERE status = $1';
-      params.push(status);
+    const restaurantId = req.user?.restaurantId;
+    if (!restaurantId) {
+      return res.status(400).json({ error: 'Restaurant ID required' });
     }
 
-    query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
-    params.push(limit, offset);
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    // Mapear estados del frontend a estados de la base de datos
+    const statusMap: Record<string, string[]> = {
+      'pending': ['draft', 'pending', 'sent_to_kitchen'],
+      'completed': ['completed', 'served', 'closed'],
+      'cancelled': ['cancelled']
+    };
+
+    let query = `
+      SELECT o.*, t.table_number, t.name as table_name
+      FROM orders o
+      LEFT JOIN tables t ON o.table_id = t.id
+      WHERE t.restaurant_id = $1
+    `;
+    const params: any[] = [restaurantId];
+    let paramIndex = 2;
+
+    if (status && statusMap[status as string]) {
+      const statuses = statusMap[status as string];
+      query += ` AND o.status = ANY($${paramIndex})`;
+      params.push(statuses);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY o.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    params.push(parseInt(limit as string), parseInt(offset as string));
+
+    console.log('[Orders] Query:', query);
+    console.log('[Orders] Params:', params);
 
     const result = await pool.query(query, params);
 
+    // Obtener items para cada orden
+    const ordersWithItems = await Promise.all(
+      result.rows.map(async (row) => {
+        const itemsResult = await pool.query(
+          'SELECT * FROM order_items WHERE order_id = $1',
+          [row.id]
+        );
+
+        // Mapear el estado de la BD al estado del frontend
+        let frontendStatus = row.status;
+        if (statusMap.pending.includes(row.status)) {
+          frontendStatus = 'pending';
+        } else if (statusMap.completed.includes(row.status)) {
+          frontendStatus = 'completed';
+        } else if (statusMap.cancelled.includes(row.status)) {
+          frontendStatus = 'cancelled';
+        }
+
+        return {
+          id: row.id,
+          orderNumber: row.order_number,
+          status: frontendStatus,
+          paymentStatus: row.payment_status,
+          subtotal: parseFloat(row.subtotal),
+          tax: parseFloat(row.tax),
+          tip: parseFloat(row.tip || 0),
+          discount: parseFloat(row.discount || 0),
+          total: parseFloat(row.total),
+          createdAt: row.created_at,
+          paidAt: row.paid_at,
+          tableId: row.table_id,
+          tableNumber: row.table_number || row.table_name,
+          items: itemsResult.rows.map(item => ({
+            id: item.id,
+            name: item.name,
+            price: parseFloat(item.price),
+            quantity: item.quantity,
+            notes: item.notes
+          }))
+        };
+      })
+    );
+
+    // Obtener el total de órdenes (sin límite)
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM orders o
+      LEFT JOIN tables t ON o.table_id = t.id
+      WHERE t.restaurant_id = $1
+      ${status && statusMap[status as string] ? `AND o.status = ANY($2)` : ''}
+    `;
+    const countParams: any[] = [restaurantId];
+    if (status && statusMap[status as string]) {
+      countParams.push(statusMap[status as string]);
+    }
+    const countResult = await pool.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].total);
+
+    console.log('[Orders] Returning', ordersWithItems.length, 'orders (total:', total, ')');
+
     return res.json({
-      orders: result.rows.map(row => ({
-        id: row.id,
-        orderNumber: row.order_number,
-        status: row.status,
-        paymentStatus: row.payment_status,
-        subtotal: parseFloat(row.subtotal),
-        tax: parseFloat(row.tax),
-        total: parseFloat(row.total),
-        createdAt: row.created_at,
-        paidAt: row.paid_at
-      })),
-      count: result.rows.length
+      orders: ordersWithItems,
+      total: total,
+      count: ordersWithItems.length
     });
   } catch (error: any) {
     console.error('[Orders] Error listing orders:', error);
     return res.status(500).json({ error: error.message });
   }
 });
-
 /**
  * GET /api/v1/orders/:id
  * Get order details with items
@@ -141,6 +225,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       tip: parseFloat(order.tip),
       discount: parseFloat(order.discount),
       total: parseFloat(order.total),
+      checkRequestedAt: order.check_requested_at || null,
       items: itemsResult.rows.map(row => ({
         id: row.id,
         menuItemId: row.menu_item_id,
@@ -299,6 +384,171 @@ router.post('/:id/items', async (req: Request, res: Response) => {
     return res.status(201).json({ ok: true, itemId });
   } catch (error: any) {
     console.error('[Orders] Error adding item:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/v1/orders/:id/print-tickets
+ * Manually trigger printing of kitchen/bar tickets
+ */
+router.post('/:id/print-tickets', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await kitchenPrintService.printOrderTickets(id);
+    return res.json({ ok: true, message: 'Tickets printed successfully' });
+  } catch (error: any) {
+    console.error('[Orders] Error printing tickets:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/v1/orders/:id/complete-ticket
+ * Mark a kitchen or bar ticket as completed
+ */
+router.post('/:id/complete-ticket', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.body; // 'kitchen' or 'bar'
+
+    if (!type || !['kitchen', 'bar'].includes(type)) {
+      return res.status(400).json({ error: 'Invalid ticket type. Must be "kitchen" or "bar"' });
+    }
+
+    await kitchenPrintService.markTicketCompleted(id, type);
+    return res.json({ ok: true, message: `Ticket marked as completed` });
+  } catch (error: any) {
+    console.error('[Orders] Error completing ticket:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/v1/orders/:id/request-check
+ * Request check (bill) for an order - generates customer receipt
+ */
+router.post('/:id/request-check', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Check if order exists
+    const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const order = orderResult.rows[0];
+
+    // Check if check already requested
+    if (order.check_requested_at) {
+      return res.status(400).json({ 
+        error: 'Check already requested',
+        checkRequestedAt: order.check_requested_at
+      });
+    }
+
+    // Update order to mark check as requested
+    await pool.query(
+      'UPDATE orders SET check_requested_at = NOW() WHERE id = $1',
+      [id]
+    );
+
+    // Generate and print customer receipt
+    try {
+      await receiptService.printReceipt(id);
+    } catch (receiptError: any) {
+      // Log error but don't fail the request
+      console.error('[Orders] Error printing receipt:', receiptError.message);
+    }
+
+    // Get updated order
+    const updatedOrderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+
+    return res.json({
+      ok: true,
+      message: 'Check requested successfully',
+      order: {
+        id: updatedOrderResult.rows[0].id,
+        orderNumber: updatedOrderResult.rows[0].order_number,
+        checkRequestedAt: updatedOrderResult.rows[0].check_requested_at
+      }
+    });
+  } catch (error: any) {
+    console.error('[Orders] Error requesting check:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/v1/orders/:id/receipt
+ * Get customer receipt as HTML
+ */
+router.get('/:id/receipt', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const orderResult = await pool.query('SELECT id FROM orders WHERE id = $1', [id]);
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const receiptHTML = await receiptService.getReceiptHTML(id);
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(receiptHTML);
+  } catch (error: any) {
+    console.error('[Orders] Error getting receipt:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/v1/orders/:id/cancel-check
+ * Cancel check request (reset check_requested_at) - only cashier can do this
+ */
+router.post('/:id/cancel-check', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Check if order exists
+    const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const order = orderResult.rows[0];
+
+    // Check if check was requested
+    if (!order.check_requested_at) {
+      return res.status(400).json({ 
+        error: 'Check was not requested for this order'
+      });
+    }
+
+    // Reset check_requested_at
+    await pool.query(
+      'UPDATE orders SET check_requested_at = NULL WHERE id = $1',
+      [id]
+    );
+
+    // Get updated order
+    const updatedOrderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+
+    return res.json({
+      ok: true,
+      message: 'Ticket cancelado exitosamente',
+      order: {
+        id: updatedOrderResult.rows[0].id,
+        orderNumber: updatedOrderResult.rows[0].order_number,
+        checkRequestedAt: null
+      }
+    });
+  } catch (error: any) {
+    console.error('[Orders] Error canceling check:', error);
     return res.status(500).json({ error: error.message });
   }
 });

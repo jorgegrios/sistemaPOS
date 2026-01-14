@@ -1,8 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const pg_1 = require("pg");
 const uuid_1 = require("uuid");
+const kitchenPrintService_1 = __importDefault(require("../services/kitchenPrintService"));
+const receiptService_1 = __importDefault(require("../services/receiptService"));
 const router = (0, express_1.Router)();
 const pool = new pg_1.Pool({ connectionString: process.env.DATABASE_URL });
 /**
@@ -34,6 +39,14 @@ router.post('/', async (req, res) => {
             await pool.query(`INSERT INTO order_items (id, order_id, menu_item_id, name, price, quantity, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`, [(0, uuid_1.v4)(), orderId, item.menuItemId, item.name, item.price, item.quantity, item.notes || null]);
         }
+        // Print kitchen/bar tickets automatically
+        try {
+            await kitchenPrintService_1.default.printOrderTickets(orderId);
+        }
+        catch (printError) {
+            // Log error but don't fail the order creation
+            console.error('[Orders] Error printing tickets:', printError.message);
+        }
         return res.status(201).json({
             id: order.id,
             orderNumber: order.order_number,
@@ -53,6 +66,10 @@ router.post('/', async (req, res) => {
  * GET /api/v1/orders
  * List all orders with filtering
  */
+/**
+ * GET /api/v1/orders
+ * List all orders with filtering
+ */
 router.get('/', async (req, res) => {
     try {
         const { status, limit = 50, offset = 0 } = req.query;
@@ -65,8 +82,10 @@ router.get('/', async (req, res) => {
         query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
         params.push(limit, offset);
         const result = await pool.query(query, params);
-        return res.json({
-            orders: result.rows.map(row => ({
+        // Obtener items para cada orden
+        const ordersWithItems = await Promise.all(result.rows.map(async (row) => {
+            const itemsResult = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [row.id]);
+            return {
                 id: row.id,
                 orderNumber: row.order_number,
                 status: row.status,
@@ -75,9 +94,19 @@ router.get('/', async (req, res) => {
                 tax: parseFloat(row.tax),
                 total: parseFloat(row.total),
                 createdAt: row.created_at,
-                paidAt: row.paid_at
-            })),
-            count: result.rows.length
+                paidAt: row.paid_at,
+                items: itemsResult.rows.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    price: parseFloat(item.price),
+                    quantity: item.quantity,
+                    notes: item.notes
+                }))
+            };
+        }));
+        return res.json({
+            orders: ordersWithItems,
+            count: ordersWithItems.length
         });
     }
     catch (error) {
@@ -115,6 +144,7 @@ router.get('/:id', async (req, res) => {
             tip: parseFloat(order.tip),
             discount: parseFloat(order.discount),
             total: parseFloat(order.total),
+            checkRequestedAt: order.check_requested_at || null,
             items: itemsResult.rows.map(row => ({
                 id: row.id,
                 menuItemId: row.menu_item_id,
@@ -238,6 +268,145 @@ router.post('/:id/items', async (req, res) => {
     }
     catch (error) {
         console.error('[Orders] Error adding item:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * POST /api/v1/orders/:id/print-tickets
+ * Manually trigger printing of kitchen/bar tickets
+ */
+router.post('/:id/print-tickets', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await kitchenPrintService_1.default.printOrderTickets(id);
+        return res.json({ ok: true, message: 'Tickets printed successfully' });
+    }
+    catch (error) {
+        console.error('[Orders] Error printing tickets:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * POST /api/v1/orders/:id/complete-ticket
+ * Mark a kitchen or bar ticket as completed
+ */
+router.post('/:id/complete-ticket', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { type } = req.body; // 'kitchen' or 'bar'
+        if (!type || !['kitchen', 'bar'].includes(type)) {
+            return res.status(400).json({ error: 'Invalid ticket type. Must be "kitchen" or "bar"' });
+        }
+        await kitchenPrintService_1.default.markTicketCompleted(id, type);
+        return res.json({ ok: true, message: `Ticket marked as completed` });
+    }
+    catch (error) {
+        console.error('[Orders] Error completing ticket:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * POST /api/v1/orders/:id/request-check
+ * Request check (bill) for an order - generates customer receipt
+ */
+router.post('/:id/request-check', async (req, res) => {
+    try {
+        const { id } = req.params;
+        // Check if order exists
+        const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+        if (orderResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        const order = orderResult.rows[0];
+        // Check if check already requested
+        if (order.check_requested_at) {
+            return res.status(400).json({
+                error: 'Check already requested',
+                checkRequestedAt: order.check_requested_at
+            });
+        }
+        // Update order to mark check as requested
+        await pool.query('UPDATE orders SET check_requested_at = NOW() WHERE id = $1', [id]);
+        // Generate and print customer receipt
+        try {
+            await receiptService_1.default.printReceipt(id);
+        }
+        catch (receiptError) {
+            // Log error but don't fail the request
+            console.error('[Orders] Error printing receipt:', receiptError.message);
+        }
+        // Get updated order
+        const updatedOrderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+        return res.json({
+            ok: true,
+            message: 'Check requested successfully',
+            order: {
+                id: updatedOrderResult.rows[0].id,
+                orderNumber: updatedOrderResult.rows[0].order_number,
+                checkRequestedAt: updatedOrderResult.rows[0].check_requested_at
+            }
+        });
+    }
+    catch (error) {
+        console.error('[Orders] Error requesting check:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * GET /api/v1/orders/:id/receipt
+ * Get customer receipt as HTML
+ */
+router.get('/:id/receipt', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const orderResult = await pool.query('SELECT id FROM orders WHERE id = $1', [id]);
+        if (orderResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        const receiptHTML = await receiptService_1.default.getReceiptHTML(id);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(receiptHTML);
+    }
+    catch (error) {
+        console.error('[Orders] Error getting receipt:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * POST /api/v1/orders/:id/cancel-check
+ * Cancel check request (reset check_requested_at) - only cashier can do this
+ */
+router.post('/:id/cancel-check', async (req, res) => {
+    try {
+        const { id } = req.params;
+        // Check if order exists
+        const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+        if (orderResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        const order = orderResult.rows[0];
+        // Check if check was requested
+        if (!order.check_requested_at) {
+            return res.status(400).json({
+                error: 'Check was not requested for this order'
+            });
+        }
+        // Reset check_requested_at
+        await pool.query('UPDATE orders SET check_requested_at = NULL WHERE id = $1', [id]);
+        // Get updated order
+        const updatedOrderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+        return res.json({
+            ok: true,
+            message: 'Ticket cancelado exitosamente',
+            order: {
+                id: updatedOrderResult.rows[0].id,
+                orderNumber: updatedOrderResult.rows[0].order_number,
+                checkRequestedAt: null
+            }
+        });
+    }
+    catch (error) {
+        console.error('[Orders] Error canceling check:', error);
         return res.status(500).json({ error: error.message });
     }
 });

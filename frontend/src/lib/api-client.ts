@@ -1,6 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
+import { getApiBaseUrl } from '../utils/api-config';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+// Usar la función de configuración que detecta automáticamente la IP
+const API_BASE_URL = getApiBaseUrl();
 
 class ApiClient {
   private client: AxiosInstance;

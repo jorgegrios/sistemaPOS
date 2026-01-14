@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const paymentOrchestrator_1 = __importDefault(require("../services/paymentOrchestrator"));
+const refundOrchestrator_1 = __importDefault(require("../services/refundOrchestrator"));
 const pg_1 = require("pg");
 const router = (0, express_1.Router)();
 const pool = new pg_1.Pool({ connectionString: process.env.DATABASE_URL });
@@ -18,13 +19,13 @@ router.post('/process', async (req, res) => {
         provider, // 'stripe', 'square', 'mercadopago'
         paymentMethodId, // token from frontend
         idempotencyKey, tip, metadata } = req.body;
-        // Validate input
-        if (!orderId || !amount || !method || !provider) {
-            return res.status(400).json({ error: 'Missing required fields' });
+        // Validate input (orderId is now optional for general payments)
+        if (!amount || !method || !provider) {
+            return res.status(400).json({ error: 'Missing required fields: amount, method, provider' });
         }
-        // Process payment
+        // Process payment (orderId can be null for general payments)
         const response = await paymentOrchestrator_1.default.processPayment({
-            orderId,
+            orderId: orderId || null,
             amount: amount + (tip || 0),
             currency,
             method,
@@ -34,8 +35,8 @@ router.post('/process', async (req, res) => {
             tip,
             metadata
         });
-        // If succeeded, update order status to PAID in database
-        if (response.status === 'succeeded') {
+        // If succeeded and orderId exists, update order status to PAID in database
+        if (response.status === 'succeeded' && orderId) {
             await pool.query('UPDATE orders SET payment_status = $1, paid_at = NOW() WHERE id = $2', ['paid', orderId]);
         }
         return res.json(response);
@@ -48,25 +49,129 @@ router.post('/process', async (req, res) => {
 /**
  * POST /api/v1/payments/refund/:id
  * Refund a payment transaction
+ *
+ * Body:
+ * - amount (optional): Partial refund amount. If not provided, full refund.
+ * - reason (optional): Reason for refund
+ * - metadata (optional): Additional metadata
  */
 router.post('/refund/:id', async (req, res) => {
     try {
         const transactionId = req.params.id;
-        const { amount, reason } = req.body;
-        // Get original transaction
-        const result = await pool.query('SELECT * FROM payment_transactions WHERE id = $1', [transactionId]);
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Transaction not found' });
-        }
-        const transaction = result.rows[0];
-        // TODO: route refund to appropriate provider based on transaction.payment_provider
-        // For now, insert refund record
-        await pool.query(`INSERT INTO refunds (payment_transaction_id, amount, reason, status, created_at)
-       VALUES ($1, $2, $3, 'pending', NOW())`, [transactionId, amount || transaction.amount, reason]);
-        return res.json({ ok: true, refundId: transactionId });
+        const { amount, reason, metadata } = req.body;
+        // Process refund through orchestrator
+        const refundResponse = await refundOrchestrator_1.default.processRefund({
+            transactionId,
+            amount: amount ? parseFloat(amount) : undefined,
+            reason,
+            metadata
+        });
+        return res.json({
+            ok: true,
+            refundId: refundResponse.refundId,
+            status: refundResponse.status,
+            amount: refundResponse.amount,
+            providerRefundId: refundResponse.providerRefundId,
+            error: refundResponse.error
+        });
     }
     catch (error) {
         console.error('[Payments] Refund error:', error);
+        // Return appropriate status code based on error
+        if (error.message.includes('not found')) {
+            return res.status(404).json({ error: error.message });
+        }
+        if (error.message.includes('cannot refund') || error.message.includes('exceeds')) {
+            return res.status(400).json({ error: error.message });
+        }
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * GET /api/v1/payments/refund/:id
+ * Get refund details
+ */
+router.get('/refund/:id', async (req, res) => {
+    try {
+        const refundId = req.params.id;
+        const refund = await refundOrchestrator_1.default.getRefund(refundId);
+        return res.json(refund);
+    }
+    catch (error) {
+        console.error('[Payments] Get refund error:', error);
+        if (error.message.includes('not found')) {
+            return res.status(404).json({ error: error.message });
+        }
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * GET /api/v1/payments/:transactionId/refunds
+ * List all refunds for a transaction
+ */
+router.get('/:transactionId/refunds', async (req, res) => {
+    try {
+        const { transactionId } = req.params;
+        const refunds = await refundOrchestrator_1.default.getRefundsByTransaction(transactionId);
+        return res.json({ refunds, total: refunds.length });
+    }
+    catch (error) {
+        console.error('[Payments] List refunds error:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * GET /api/v1/payments
+ * List all payments with optional filters
+ */
+router.get('/', async (req, res) => {
+    try {
+        const { orderId, status, provider, limit = '50', offset = '0' } = req.query;
+        let query = 'SELECT * FROM payment_transactions WHERE 1=1';
+        const params = [];
+        let paramCount = 1;
+        if (orderId) {
+            query += ` AND order_id = $${paramCount++}`;
+            params.push(orderId);
+        }
+        if (status) {
+            query += ` AND status = $${paramCount++}`;
+            params.push(status);
+        }
+        if (provider) {
+            query += ` AND payment_provider = $${paramCount++}`;
+            params.push(provider);
+        }
+        query += ` ORDER BY created_at DESC LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+        params.push(parseInt(limit), parseInt(offset));
+        const result = await pool.query(query, params);
+        // Get total count for pagination
+        let countQuery = 'SELECT COUNT(*) FROM payment_transactions WHERE 1=1';
+        const countParams = [];
+        let countParamCount = 1;
+        if (orderId) {
+            countQuery += ` AND order_id = $${countParamCount++}`;
+            countParams.push(orderId);
+        }
+        if (status) {
+            countQuery += ` AND status = $${countParamCount++}`;
+            countParams.push(status);
+        }
+        if (provider) {
+            countQuery += ` AND payment_provider = $${countParamCount++}`;
+            countParams.push(provider);
+        }
+        const countResult = await pool.query(countQuery, countParams);
+        const total = parseInt(countResult.rows[0].count);
+        return res.json({
+            payments: result.rows,
+            total,
+            limit: parseInt(limit),
+            offset: parseInt(offset)
+        });
+    }
+    catch (error) {
+        console.error('[Payments] Error listing payments:', error);
         return res.status(500).json({ error: error.message });
     }
 });

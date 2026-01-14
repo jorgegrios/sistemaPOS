@@ -57,21 +57,21 @@ class PaymentService {
       tip: data.tip,
       metadata: data.metadata
     };
-    return apiClient.post<Payment>('/payments/process', backendData);
+    return apiClient.post<Payment>('/v1/payments/process', backendData);
   }
 
   /**
    * Get payment details
    */
   async getPayment(paymentId: string): Promise<Payment> {
-    return apiClient.get<Payment>(`/payments/${paymentId}`);
+    return apiClient.get<Payment>(`/v1/payments/${paymentId}`);
   }
 
   /**
    * Refund a payment
    */
   async refundPayment(paymentId: string, data?: RefundRequest): Promise<Payment> {
-    return apiClient.post<Payment>(`/payments/${paymentId}/refund`, data || {});
+    return apiClient.post<Payment>(`/v1/payments/${paymentId}/refund`, data || {});
   }
 
   /**
@@ -164,7 +164,7 @@ class PaymentService {
       ? '?' + new URLSearchParams(params as Record<string, string>).toString()
       : '';
     return apiClient.get<{ payments: Payment[]; total: number; limit: number; offset: number }>(
-      `/payments${queryString}`
+      `/v1/payments${queryString}`
     );
   }
 
@@ -188,9 +188,9 @@ class PaymentService {
   /**
    * Get Stripe configuration (publishable key)
    */
-  async getStripeConfig(): Promise<{ publishableKey: string; enabled: boolean }> {
-    return apiClient.get<{ publishableKey: string; enabled: boolean }>(
-      '/payments/stripe/config'
+  async getStripeConfig(): Promise<{ publishableKey: string | null; enabled: boolean }> {
+    return apiClient.get<{ publishableKey: string | null; enabled: boolean }>(
+      '/v1/payments/stripe/config'
     );
   }
 }

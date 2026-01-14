@@ -29,8 +29,14 @@ export const StripeProviderWrapper: React.FC<StripeProviderWrapperProps> = ({ ch
             stripePromise = loadStripe(config.publishableKey);
           }
         }
+        // If Stripe is not enabled, silently continue without Stripe
+        // This is expected behavior when Stripe is not configured
       } catch (error) {
-        console.warn('Stripe is not configured:', error);
+        // Only log if it's an unexpected error (not 200 with enabled: false)
+        if (error instanceof Error && !error.message.includes('not configured')) {
+          console.warn('Error loading Stripe config:', error);
+        }
+        // Silently continue - Stripe is optional
       } finally {
         setLoading(false);
       }
@@ -54,5 +60,6 @@ export const StripeProviderWrapper: React.FC<StripeProviderWrapperProps> = ({ ch
     </Elements>
   );
 };
+
 
 

@@ -39,10 +39,11 @@ class AIAnalysisService {
    * Get comprehensive business insights
    */
   async getInsights(days: number = 30): Promise<BusinessInsights> {
-    return apiClient.get<BusinessInsights>(`/ai-analysis/insights?days=${days}`);
+    return apiClient.get<BusinessInsights>(`/v1/ai-analysis/insights?days=${days}`);
   }
 }
 
 export const aiAnalysisService = new AIAnalysisService();
+
 
 

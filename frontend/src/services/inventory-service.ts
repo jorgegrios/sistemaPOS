@@ -81,31 +81,31 @@ class InventoryService {
     if (filters?.lowStock) params.append('lowStock', 'true');
 
     const response = await apiClient.get<{ items: InventoryItem[] }>(
-      `/inventory?${params.toString()}`
+      `/v1/inventory?${params.toString()}`
     );
     return response.items;
   }
 
   async getInventoryItem(id: string): Promise<{ item: InventoryItem; movements: InventoryMovement[] }> {
-    return await apiClient.get(`/inventory/${id}`);
+    return await apiClient.get(`/v1/inventory/${id}`);
   }
 
   async createInventoryItem(data: CreateInventoryItemRequest): Promise<InventoryItem> {
-    const response = await apiClient.post<{ item: InventoryItem }>('/inventory', data);
+    const response = await apiClient.post<{ item: InventoryItem }>('/v1/inventory', data);
     return response.item;
   }
 
   async updateInventoryItem(id: string, data: Partial<CreateInventoryItemRequest>): Promise<InventoryItem> {
-    const response = await apiClient.put<{ item: InventoryItem }>(`/inventory/${id}`, data);
+    const response = await apiClient.put<{ item: InventoryItem }>(`/v1/inventory/${id}`, data);
     return response.item;
   }
 
   async adjustStock(id: string, data: AdjustStockRequest): Promise<{ item: InventoryItem; movement: InventoryMovement }> {
-    return await apiClient.post(`/inventory/${id}/adjust`, data);
+    return await apiClient.post(`/v1/inventory/${id}/adjust`, data);
   }
 
   async getStockAlerts(): Promise<StockAlert[]> {
-    const response = await apiClient.get<{ alerts: StockAlert[] }>('/inventory/alerts/stock');
+    const response = await apiClient.get<{ alerts: StockAlert[] }>('/v1/inventory/alerts/stock');
     return response.alerts;
   }
 
@@ -123,12 +123,13 @@ class InventoryService {
     if (filters?.endDate) params.append('endDate', filters.endDate);
 
     const response = await apiClient.get<{ movements: InventoryMovement[] }>(
-      `/inventory/${id}/movements?${params.toString()}`
+      `/v1/inventory/${id}/movements?${params.toString()}`
     );
     return response.movements;
   }
 }
 
 export const inventoryService = new InventoryService();
+
 
 

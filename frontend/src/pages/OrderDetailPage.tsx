@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderService, Order } from '../services/order-service';
+import { getApiBaseUrl } from '../utils/api-config';
 
 export const OrderDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -93,7 +94,7 @@ export const OrderDetailPage: React.FC = () => {
       setOrder(updatedOrder);
       alert(result.message || 'Cuenta solicitada exitosamente. El ticket ha sido generado.');
       // Optionally open receipt in new window
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+      const apiUrl = getApiBaseUrl();
       window.open(`${apiUrl}/orders/${id}/receipt`, '_blank');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Error al solicitar la cuenta';
@@ -295,7 +296,7 @@ export const OrderDetailPage: React.FC = () => {
                   </p>
                   <button
                     onClick={() => {
-                      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+                      const apiUrl = getApiBaseUrl();
                       window.open(`${apiUrl}/orders/${id}/receipt`, '_blank');
                     }}
                     className="mt-2 w-full bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition duration-200"

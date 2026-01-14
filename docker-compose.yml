@@ -1,44 +1,116 @@
-version: '3.8'
+# docker-compose.yml - VERSIÓN SEGURA
+# Docker Compose configuration for Sistema POS
+# Note: version is obsolete in Docker Compose v2+
+
 services:
   postgres:
-    image: postgres:16
+    image: postgres:15-alpine
+    container_name: sistema_pos_db
     environment:
-      POSTGRES_USER: pos
-      POSTGRES_PASSWORD: pospass
-      POSTGRES_DB: pos_dev
-    volumes:
-      - pg_data:/var/lib/postgresql/data
+      POSTGRES_DB: ${POSTGRES_DB:-pos_system}
+      POSTGRES_USER: ${POSTGRES_USER:-pos_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-REPLACE_WITH_SECURE_PASSWORD}
     ports:
-      - 5432:5432
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - pos-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pos_admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: sistema_pos_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-REPLACE_WITH_SECURE_PASSWORD} --appendonly yes
     ports:
-      - 6379:6379
-
-  rabbitmq:
-    image: rabbitmq:3-management
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    ports:
-      - 5672:5672
-      - 15672:15672
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - pos-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-REPLACE_WITH_SECURE_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
-    build: ./backend
-    volumes:
-      - ./backend:/usr/src/app
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sistema_pos_backend
     environment:
-      - NODE_ENV=development
-      - DATABASE_URL=postgresql://pos:pospass@postgres:5432/pos_dev
-      - REDIS_URL=redis://redis:6379
+      # App
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${BACKEND_PORT:-3000}
+      
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pos_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pos_system}
+      
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      
+      # Security
+      JWT_SECRET: ${JWT_SECRET:-REPLACE_WITH_SECURE_JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-REPLACE_WITH_DIFFERENT_SECRET}
+      
+      # CORS
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      
+      # Payment Gateways (use env variables or secrets)
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_xxx}
+      SQUARE_ACCESS_TOKEN: ${SQUARE_ACCESS_TOKEN:-sandbox-token}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-TEST-xxx}
+      
     ports:
-      - 3000:3000
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - ./logs:/app/logs
     depends_on:
-      - postgres
-      - redis
-      - rabbitmq
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pos-network
+    restart: unless-stopped
+    command: npm start
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sistema_pos_frontend
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+      VITE_APP_NAME: ${VITE_APP_NAME:-Sistema POS}
+      VITE_ENABLE_PWA: ${VITE_ENABLE_PWA:-true}
+      VITE_ENABLE_OFFLINE: ${VITE_ENABLE_OFFLINE:-true}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - pos-network
+    restart: unless-stopped
+    command: npm run dev -- --host
+
+networks:
+  pos-network:
+    driver: bridge
 
 volumes:
-  pg_data:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/auth-context';
 import { dashboardService, DailySummary } from '../services/dashboard-service';
 import { aiAnalysisService, BusinessInsights } from '../services/ai-analysis-service';
 import { toast } from 'sonner';
+import { getApiBaseUrl } from '../utils/api-config';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -24,40 +25,48 @@ export const DashboardPage: React.FC = () => {
   
   const isAdmin = user?.role === 'admin';
 
-  useEffect(() => {
-    const loadDailySummary = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const summary = await dashboardService.getDailySummary();
-        setDailySummary(summary);
-      } catch (err: any) {
-        console.error('Error loading daily summary:', err);
-        const errorMsg = err?.message || 'Error al cargar resumen del día';
-        setError(errorMsg);
+  const loadDailySummary = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const summary = await dashboardService.getDailySummary();
+      setDailySummary(summary);
+    } catch (err: any) {
+      console.error('Error loading daily summary:', err);
+      const errorMsg = err?.message || 'Error al cargar resumen del día';
+      setError(errorMsg);
+      if (!loading) {
         toast.error(errorMsg);
-        // Set empty summary to prevent crash
-        setDailySummary({
-          date: new Date().toISOString().split('T')[0],
-          totalOrders: 0,
-          completedOrders: 0,
-          pendingOrders: 0,
-          cancelledOrders: 0,
-          totalSales: 0,
-          cashAmount: 0,
-          cardAmount: 0,
-          kitchenSales: 0,
-          barSales: 0,
-          baseAmount: 0,
-          orders: []
-        });
-      } finally {
-        setLoading(false);
       }
-    };
+      // Set empty summary to prevent crash
+      setDailySummary({
+        date: new Date().toISOString().split('T')[0],
+        totalOrders: 0,
+        completedOrders: 0,
+        pendingOrders: 0,
+        cancelledOrders: 0,
+        totalSales: 0,
+        cashAmount: 0,
+        cardAmount: 0,
+        kitchenSales: 0,
+        barSales: 0,
+        baseAmount: 0,
+        orders: []
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     if (user) {
+      // Cargar inmediatamente
       loadDailySummary();
+      
+      // Actualizar automáticamente cada 10 segundos
+      const interval = setInterval(loadDailySummary, 10000);
+      
+      return () => clearInterval(interval);
     }
   }, [user]);
 
@@ -225,13 +234,32 @@ export const DashboardPage: React.FC = () => {
   return (
     <div className="p-3 sm:p-4 lg:p-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-4 sm:mb-6 lg:mb-8">
-        <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text mb-2">
-          📊 Dashboard
-        </h1>
-        <p className="text-gray-700 text-sm sm:text-base font-medium">
-          Resumen del día - {dailySummary ? formatDate(dailySummary.date) : 'Cargando...'}
-        </p>
+      <div className="mb-4 sm:mb-6 lg:mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text mb-2">
+            📊 Dashboard
+          </h1>
+          <p className="text-gray-700 text-sm sm:text-base font-medium">
+            Resumen del día - {dailySummary ? formatDate(dailySummary.date) : 'Cargando...'}
+          </p>
+        </div>
+        <button
+          onClick={loadDailySummary}
+          disabled={loading}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm transition active:scale-95 min-h-[44px] flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? (
+            <>
+              <span className="animate-spin">⏳</span>
+              <span>Actualizando...</span>
+            </>
+          ) : (
+            <>
+              <span>🔄</span>
+              <span>Actualizar</span>
+            </>
+          )}
+        </button>
       </div>
 
       {error && (
@@ -276,7 +304,7 @@ export const DashboardPage: React.FC = () => {
                         e.stopPropagation();
                         const amount = prompt('Ingresa la base inicial de caja:', dailySummary.baseAmount.toString());
                         if (amount !== null && !isNaN(parseFloat(amount))) {
-                          fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'}/dashboard/cash-base`, {
+                          fetch(`${getApiBaseUrl()}/dashboard/cash-base`, {
                             method: 'PUT',
                             headers: {
                               'Content-Type': 'application/json',

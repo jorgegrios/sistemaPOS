@@ -87,22 +87,22 @@ class PurchaseService {
   // Suppliers
   async getSuppliers(activeOnly: boolean = false): Promise<Supplier[]> {
     const params = activeOnly ? '?activeOnly=true' : '';
-    const response = await apiClient.get<{ suppliers: Supplier[] }>(`/purchases/suppliers${params}`);
+    const response = await apiClient.get<{ suppliers: Supplier[] }>(`/v1/purchases/suppliers${params}`);
     return response.suppliers;
   }
 
   async getSupplier(id: string): Promise<Supplier> {
-    const response = await apiClient.get<{ supplier: Supplier }>(`/purchases/suppliers/${id}`);
+    const response = await apiClient.get<{ supplier: Supplier }>(`/v1/purchases/suppliers/${id}`);
     return response.supplier;
   }
 
   async createSupplier(data: CreateSupplierRequest): Promise<Supplier> {
-    const response = await apiClient.post<{ supplier: Supplier }>('/purchases/suppliers', data);
+    const response = await apiClient.post<{ supplier: Supplier }>('/v1/purchases/suppliers', data);
     return response.supplier;
   }
 
   async updateSupplier(id: string, data: Partial<CreateSupplierRequest>): Promise<Supplier> {
-    const response = await apiClient.put<{ supplier: Supplier }>(`/purchases/suppliers/${id}`, data);
+    const response = await apiClient.put<{ supplier: Supplier }>(`/v1/purchases/suppliers/${id}`, data);
     return response.supplier;
   }
 
@@ -117,29 +117,30 @@ class PurchaseService {
 
     const query = params.toString();
     const response = await apiClient.get<{ orders: PurchaseOrder[] }>(
-      `/purchases/orders${query ? `?${query}` : ''}`
+      `/v1/purchases/orders${query ? `?${query}` : ''}`
     );
     return response.orders;
   }
 
   async getPurchaseOrder(id: string): Promise<{ order: PurchaseOrder; items: PurchaseOrderItem[] }> {
-    return await apiClient.get(`/purchases/orders/${id}`);
+    return await apiClient.get(`/v1/purchases/orders/${id}`);
   }
 
   async createPurchaseOrder(data: CreatePurchaseOrderRequest): Promise<{ order: PurchaseOrder; items: PurchaseOrderItem[] }> {
-    return await apiClient.post('/purchases/orders', data);
+    return await apiClient.post('/v1/purchases/orders', data);
   }
 
   async updatePurchaseOrderStatus(id: string, status: PurchaseOrder['status']): Promise<PurchaseOrder> {
-    const response = await apiClient.put<{ order: PurchaseOrder }>(`/purchases/orders/${id}/status`, { status });
+    const response = await apiClient.put<{ order: PurchaseOrder }>(`/v1/purchases/orders/${id}/status`, { status });
     return response.order;
   }
 
   async receivePurchaseOrder(id: string, data: ReceivePurchaseOrderRequest): Promise<{ order: PurchaseOrder; items: PurchaseOrderItem[] }> {
-    return await apiClient.post(`/purchases/orders/${id}/receive`, data);
+    return await apiClient.post(`/v1/purchases/orders/${id}/receive`, data);
   }
 }
 
 export const purchaseService = new PurchaseService();
+
 
 

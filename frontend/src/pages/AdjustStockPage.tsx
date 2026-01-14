@@ -191,3 +191,8 @@ export const AdjustStockPage: React.FC = () => {
 };
 
 
+
+
+
+
+

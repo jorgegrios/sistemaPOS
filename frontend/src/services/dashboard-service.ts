@@ -38,10 +38,11 @@ class DashboardService {
    * Get daily summary
    */
   async getDailySummary(): Promise<DailySummary> {
-    return apiClient.get<DailySummary>('/dashboard/daily-summary');
+    return apiClient.get<DailySummary>('/v1/dashboard/daily-summary');
   }
 }
 
 export const dashboardService = new DashboardService();
+
 
 

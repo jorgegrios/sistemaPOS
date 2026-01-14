@@ -64,7 +64,7 @@ class OrderService {
    * Create a new order
    */
   async createOrder(data: CreateOrderRequest): Promise<Order> {
-    return apiClient.post<Order>('/orders', data);
+    return apiClient.post<Order>('/v1/orders', data);
   }
 
   /**
@@ -79,35 +79,35 @@ class OrderService {
     const queryString = params
       ? '?' + new URLSearchParams(params as Record<string, string>).toString()
       : '';
-    return apiClient.get<{ orders: Order[]; total: number }>(`/orders${queryString}`);
+    return apiClient.get<{ orders: Order[]; total: number }>(`/v1/orders${queryString}`);
   }
 
   /**
    * Get a specific order
    */
   async getOrder(orderId: string): Promise<Order> {
-    return apiClient.get<Order>(`/orders/${orderId}`);
+    return apiClient.get<Order>(`/v1/orders/${orderId}`);
   }
 
   /**
    * Update an order (status, discount, tip)
    */
   async updateOrder(orderId: string, data: UpdateOrderRequest): Promise<Order> {
-    return apiClient.put<Order>(`/orders/${orderId}`, data);
+    return apiClient.put<Order>(`/v1/orders/${orderId}`, data);
   }
 
   /**
    * Cancel an order
    */
   async cancelOrder(orderId: string): Promise<void> {
-    await apiClient.delete(`/orders/${orderId}`);
+    await apiClient.delete(`/v1/orders/${orderId}`);
   }
 
   /**
    * Add item to an existing order
    */
   async addItemToOrder(orderId: string, data: AddOrderItemRequest): Promise<Order> {
-    return apiClient.post<Order>(`/orders/${orderId}/items`, data);
+    return apiClient.post<Order>(`/v1/orders/${orderId}/items`, data);
   }
 
   /**
@@ -135,14 +135,14 @@ class OrderService {
    * Request check (bill) for an order - generates customer receipt
    */
   async requestCheck(orderId: string): Promise<{ ok: boolean; message: string; order: { id: string; orderNumber: string; checkRequestedAt: string } }> {
-    return apiClient.post(`/orders/${orderId}/request-check`);
+    return apiClient.post(`/v1/orders/${orderId}/request-check`);
   }
 
   /**
    * Cancel check request (reset check_requested_at) - for cashier
    */
   async cancelCheck(orderId: string): Promise<{ ok: boolean; message: string; order: { id: string; orderNumber: string; checkRequestedAt: null } }> {
-    return apiClient.post(`/orders/${orderId}/cancel-check`);
+    return apiClient.post(`/v1/orders/${orderId}/cancel-check`);
   }
 }
 

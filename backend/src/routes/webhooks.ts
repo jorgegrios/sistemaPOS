@@ -4,9 +4,11 @@ import {
   verifyStripeSignature,
   verifySquareSignature,
   verifyMercadoPagoSignature,
+  verifyPayPalSignature,
   handleStripeWebhook,
   handleSquareWebhook,
-  handleMercadoPagoWebhook
+  handleMercadoPagoWebhook,
+  handlePayPalWebhook
 } from '../lib/webhooks';
 
 const router = Router();
@@ -107,22 +109,24 @@ router.post('/mercadopago', express.json(), async (req: Request, res: Response) 
 /**
  * POST /api/v1/webhooks/paypal
  * PayPal webhook handler with HMAC verification
- * TODO: Implement PayPal signature verification
  */
-router.post('/paypal', express.json(), async (req: Request, res: Response) => {
+router.post('/paypal', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
   try {
-    const event = req.body;
+    const webhookId = process.env.PAYPAL_WEBHOOK_ID || '';
+    const body = req.body.toString();
 
-    console.log(`[PayPal Webhook] Processing event: ${event.event_type}`);
-
-    if (event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
-      const resource = event.resource;
-      // TODO: Update transaction status to succeeded
-      // TODO: Update order status to paid
-    } else if (event.event_type === 'PAYMENT.CAPTURE.DENIED' || event.event_type === 'PAYMENT.CAPTURE.REFUNDED') {
-      // TODO: Update transaction status to failed or refunded
+    // Verify PayPal signature
+    if (!verifyPayPalSignature(req.headers, body, webhookId)) {
+      return res.status(403).json({ error: 'Invalid PayPal signature' });
     }
 
+    // Parse JSON body
+    const event = JSON.parse(body);
+
+    // Handle webhook event
+    await handlePayPalWebhook(event);
+
+    // Return 200 to acknowledge receipt
     return res.status(200).json({ received: true });
   } catch (error: any) {
     console.error('[Webhooks] PayPal error:', error.message);

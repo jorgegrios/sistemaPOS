@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const pg_1 = require("pg");
 const uuid_1 = require("uuid");
+const auth_1 = require("./auth");
 const router = (0, express_1.Router)();
 const pool = new pg_1.Pool({ connectionString: process.env.DATABASE_URL });
 /**
@@ -82,10 +83,120 @@ router.get('/:restaurantId/:menuId', async (req, res) => {
     }
 });
 /**
- * POST /api/v1/items
+ * POST /api/v1/menus/:restaurantId
+ * Create new menu
+ */
+router.post('/:restaurantId', auth_1.verifyToken, async (req, res) => {
+    try {
+        const { restaurantId } = req.params;
+        const { name, description } = req.body;
+        if (!name) {
+            return res.status(400).json({ error: 'Menu name is required' });
+        }
+        const menuId = (0, uuid_1.v4)();
+        await pool.query(`INSERT INTO menus (id, restaurant_id, name, description, active)
+       VALUES ($1, $2, $3, $4, true)`, [menuId, restaurantId, name, description || null]);
+        return res.status(201).json({
+            id: menuId,
+            restaurantId,
+            name,
+            description
+        });
+    }
+    catch (error) {
+        console.error('[Menus] Error creating menu:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * POST /api/v1/menus/categories
+ * Create new menu category
+ */
+router.post('/categories', auth_1.verifyToken, async (req, res) => {
+    try {
+        const { menuId, name, displayOrder } = req.body;
+        if (!menuId || !name) {
+            return res.status(400).json({ error: 'Menu ID and category name are required' });
+        }
+        const categoryId = (0, uuid_1.v4)();
+        await pool.query(`INSERT INTO menu_categories (id, menu_id, name, display_order)
+       VALUES ($1, $2, $3, $4)`, [categoryId, menuId, name, displayOrder || 0]);
+        return res.status(201).json({
+            id: categoryId,
+            menuId,
+            name,
+            displayOrder: displayOrder || 0
+        });
+    }
+    catch (error) {
+        console.error('[Menus] Error creating category:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * PUT /api/v1/menus/categories/:id
+ * Update menu category
+ */
+router.put('/categories/:id', auth_1.verifyToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, displayOrder } = req.body;
+        const updates = [];
+        const params = [];
+        let paramCount = 1;
+        if (name) {
+            updates.push(`name = $${paramCount}`);
+            params.push(name);
+            paramCount++;
+        }
+        if (displayOrder !== undefined) {
+            updates.push(`display_order = $${paramCount}`);
+            params.push(displayOrder);
+            paramCount++;
+        }
+        if (updates.length === 0) {
+            return res.status(400).json({ error: 'No fields to update' });
+        }
+        params.push(id);
+        const result = await pool.query(`UPDATE menu_categories SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`, params);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Category not found' });
+        }
+        return res.json({
+            id: result.rows[0].id,
+            menuId: result.rows[0].menu_id,
+            name: result.rows[0].name,
+            displayOrder: result.rows[0].display_order
+        });
+    }
+    catch (error) {
+        console.error('[Menus] Error updating category:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * DELETE /api/v1/menus/categories/:id
+ * Delete menu category
+ */
+router.delete('/categories/:id', auth_1.verifyToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('DELETE FROM menu_categories WHERE id = $1 RETURNING id', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Category not found' });
+        }
+        return res.json({ ok: true, message: 'Category deleted' });
+    }
+    catch (error) {
+        console.error('[Menus] Error deleting category:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * POST /api/v1/menus/items
  * Create new menu item
  */
-router.post('/', async (req, res) => {
+router.post('/items', auth_1.verifyToken, async (req, res) => {
     try {
         const { categoryId, name, description, price, imageUrl, available } = req.body;
         if (!categoryId || !name || price === undefined) {
@@ -110,10 +221,10 @@ router.post('/', async (req, res) => {
     }
 });
 /**
- * GET /api/v1/items/:id
+ * GET /api/v1/menus/items/:id
  * Get menu item details
  */
-router.get('/:id', async (req, res) => {
+router.get('/items/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query('SELECT * FROM menu_items WHERE id = $1', [id]);
@@ -138,10 +249,10 @@ router.get('/:id', async (req, res) => {
     }
 });
 /**
- * PUT /api/v1/items/:id
+ * PUT /api/v1/menus/items/:id
  * Update menu item (price, availability, description)
  */
-router.put('/:id', async (req, res) => {
+router.put('/items/:id', auth_1.verifyToken, async (req, res) => {
     try {
         const { id } = req.params;
         const { name, description, price, available, imageUrl } = req.body;
@@ -197,10 +308,10 @@ router.put('/:id', async (req, res) => {
     }
 });
 /**
- * DELETE /api/v1/items/:id
+ * DELETE /api/v1/menus/items/:id
  * Delete menu item
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/items/:id', auth_1.verifyToken, async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query('DELETE FROM menu_items WHERE id = $1 RETURNING id', [id]);
