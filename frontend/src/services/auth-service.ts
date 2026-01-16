@@ -44,6 +44,9 @@ class AuthService {
 
     if (response.token) {
       apiClient.setToken(response.token);
+      if (response.user?.restaurantId) {
+        apiClient.setRestaurantId(response.user.restaurantId);
+      }
     }
 
     return response;
@@ -60,6 +63,9 @@ class AuthService {
 
     if (response.token) {
       apiClient.setToken(response.token);
+      if (response.user?.restaurantId) {
+        apiClient.setRestaurantId(response.user.restaurantId);
+      }
     }
 
     return response;

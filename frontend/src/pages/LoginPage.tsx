@@ -10,9 +10,9 @@ import { useAuth } from '../contexts/auth-context';
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, error: authError } = useAuth();
-  
-  const [email, setEmail] = useState('waiter@testrestaurant.com');
-  const [password, setPassword] = useState('password_waiter');
+
+  const [email, setEmail] = useState('mesero1@restaurant.com');
+  const [password, setPassword] = useState('mesero123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +25,7 @@ export const LoginPage: React.FC = () => {
       await login(email, password);
       navigate('/');
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Login failed';
+      const errorMsg = err instanceof Error ? err.message : 'Error al iniciar sesión';
       setError(errorMsg);
     } finally {
       setLoading(false);
@@ -38,12 +38,12 @@ export const LoginPage: React.FC = () => {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">Sistema POS</h1>
-          <p className="text-blue-100">Point of Sale System</p>
+          <p className="text-blue-100">Sistema de Punto de Venta</p>
         </div>
 
         {/* Card */}
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">Login</h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-6">Iniciar Sesión</h2>
 
           {/* Error Messages */}
           {(error || authError) && (
@@ -57,14 +57,14 @@ export const LoginPage: React.FC = () => {
             {/* Email Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
+                Correo Electrónico
               </label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
-                placeholder="Enter your email"
+                placeholder="Ingresa tu correo"
                 required
                 disabled={loading}
               />
@@ -73,14 +73,14 @@ export const LoginPage: React.FC = () => {
             {/* Password Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Password
+                Contraseña
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
-                placeholder="Enter your password"
+                placeholder="Ingresa tu contraseña"
                 required
                 disabled={loading}
               />
@@ -94,22 +94,22 @@ export const LoginPage: React.FC = () => {
             >
               {loading ? (
                 <span className="flex items-center justify-center">
-                  <span className="animate-spin mr-2">⏳</span> Logging in...
+                  <span className="animate-spin mr-2">⏳</span> Validando...
                 </span>
               ) : (
-                'Login'
+                'Ingresar'
               )}
             </button>
           </form>
 
           {/* Test Credentials Info */}
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-            <p className="text-sm text-gray-700 font-semibold mb-2">Test Credentials:</p>
+            <p className="text-sm text-gray-700 font-semibold mb-2">Credenciales de Prueba:</p>
             <div className="text-xs text-gray-600 space-y-1">
-              <p><strong>Waiter:</strong> waiter@testrestaurant.com / password_waiter</p>
-              <p><strong>Cashier:</strong> cashier@testrestaurant.com / password_cashier</p>
-              <p><strong>Manager:</strong> manager@testrestaurant.com / password_manager</p>
-              <p><strong>Admin:</strong> admin@testrestaurant.com / password_admin</p>
+              <p><strong>Mesero:</strong> mesero1@restaurant.com / mesero123</p>
+              <p><strong>Cajero:</strong> cajero@restaurant.com / cajero123</p>
+              <p><strong>Gerente:</strong> gerente@restaurant.com / gerente123</p>
+              <p><strong>Admin:</strong> admin@restaurant.com / admin123</p>
             </div>
           </div>
         </div>

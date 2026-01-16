@@ -7,18 +7,18 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/auth-context';
-import { 
-  ordersDomainService, 
+import {
+  ordersDomainService,
   OrderWithItems,
-  AddItemsRequest 
+  AddItemsRequest
 } from '../domains/orders/service';
-import { 
-  tablesDomainService, 
+import {
+  tablesDomainService,
   TableWithOrder
 } from '../domains/tables/service';
-import { 
-  productsDomainService, 
-  Product 
+import {
+  productsDomainService,
+  Product
 } from '../domains/products/service';
 import { menuService } from '../services/menu-service';
 import { toast } from 'sonner';
@@ -34,6 +34,7 @@ interface CartItem {
   quantity: number;
   notes?: string;
   customization?: ProductCustomization; // Personalizaciones del producto
+  seatNumber: number; // Seat number for split checks
 }
 
 interface MenuCategory {
@@ -51,7 +52,7 @@ interface MenuCategory {
 export const CreateOrderPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   // Estado simple
   const [tables, setTables] = useState<TableWithOrder[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
@@ -62,7 +63,25 @@ export const CreateOrderPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [sendingToKitchen, setSendingToKitchen] = useState(false);
   const [showTableSelection, setShowTableSelection] = useState(true); // Controla si mostrar selección de mesas o vista de pedidos
-  
+  const [selectedSeat, setSelectedSeat] = useState(1); // Default to Seat 1
+  const [maxSeat, setMaxSeat] = useState(1); // Track maximum seat number used
+
+  // Offline State
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Estado para modal de personalización
   const [customizationModalOpen, setCustomizationModalOpen] = useState(false);
   const [productToCustomize, setProductToCustomize] = useState<Product | null>(null);
@@ -71,7 +90,7 @@ export const CreateOrderPage: React.FC = () => {
   // Cargar datos iniciales
   useEffect(() => {
     loadInitialData();
-    
+
     // Polling simple para actualizar mesas cada 10 segundos
     const interval = setInterval(loadTables, 10000);
     return () => clearInterval(interval);
@@ -79,7 +98,7 @@ export const CreateOrderPage: React.FC = () => {
 
   const loadInitialData = async () => {
     if (!user?.restaurantId) return;
-    
+
     try {
       setLoading(true);
       await Promise.all([loadTables(), loadProducts()]);
@@ -93,11 +112,11 @@ export const CreateOrderPage: React.FC = () => {
 
   const loadTables = async () => {
     if (!user?.restaurantId) return;
-    
+
     try {
       // SIEMPRE usar el estado del backend - sobrescribe cualquier estado local
       const tablesList = await tablesDomainService.getTablesWithOrders(user.restaurantId);
-      
+
       // DEBUG: Log para verificar qué está devolviendo el backend
       console.log('[Frontend] Tables loaded from backend:', tablesList.length, 'tables');
       const tablesWithActiveOrders = tablesList.filter(t => t.activeOrderId);
@@ -105,24 +124,24 @@ export const CreateOrderPage: React.FC = () => {
       tablesWithActiveOrders.forEach(t => {
         console.log(`  - Mesa ${t.name}: activeOrderId = ${t.activeOrderId?.substring(0, 8)}`);
       });
-      
+
       // IMPORTANTE: El backend solo devuelve activeOrderId para órdenes 'draft' o 'sent_to_kitchen'
       // Si una orden está 'served', el backend NO la incluirá en activeOrderId
       // Forzar que activeOrderId sea null si está vacío o undefined
       const cleanedTablesList = tablesList.map(table => ({
         ...table,
         // Asegurar que activeOrderId solo existe si es válido
-        activeOrderId: (table.activeOrderId && typeof table.activeOrderId === 'string' && table.activeOrderId.trim() !== '') 
-          ? table.activeOrderId 
+        activeOrderId: (table.activeOrderId && typeof table.activeOrderId === 'string' && table.activeOrderId.trim() !== '')
+          ? table.activeOrderId
           : undefined
       }));
-      
+
       setTables(cleanedTablesList);
-      
+
       // Si hay una mesa seleccionada, actualizar su referencia y orden actual
       if (selectedTableId) {
         const updatedTable = cleanedTablesList.find(t => t.id === selectedTableId);
-        
+
         // Si la mesa NO tiene activeOrderId en el backend, limpiar la orden actual
         // Esto puede pasar si la orden cambió a 'served' o 'closed'
         if (!updatedTable?.activeOrderId) {
@@ -139,11 +158,11 @@ export const CreateOrderPage: React.FC = () => {
             // Orden ya cargada - recargarla para obtener el estado actualizado
             try {
               const updatedOrder = await ordersDomainService.getOrderWithItems(updatedTable.activeOrderId);
-              
+
               // Si la orden cambió a 'served' o 'closed', el backend ya no la incluirá en activeOrderId
               // Pero si estamos aquí, es porque aún está activa según el backend
               setCurrentOrder(updatedOrder);
-              
+
               // Si la orden cambió a 'served', mostrar notificación
               if (updatedOrder.status === 'served' && currentOrder.status !== 'served') {
                 toast.success('✅ Pedidos entregados por la cocina');
@@ -165,11 +184,11 @@ export const CreateOrderPage: React.FC = () => {
 
   const loadProducts = async () => {
     if (!user?.restaurantId) return;
-    
+
     try {
       // Cargar productos activos
       const products = await productsDomainService.getActiveProducts();
-      
+
       // DEBUG: Log productos para verificar que tienen nombres
       console.log('[CreateOrderPage] Products loaded:', products.length);
       if (products.length > 0) {
@@ -180,32 +199,32 @@ export const CreateOrderPage: React.FC = () => {
           basePrice: products[0].basePrice
         });
       }
-      
+
       // Validar que los productos tengan nombres, si no, loguear advertencia
       const productsWithoutNames = products.filter(p => !p.name || p.name.trim() === '');
       if (productsWithoutNames.length > 0) {
         console.warn(`[CreateOrderPage] Found ${productsWithoutNames.length} products without names:`, productsWithoutNames.map(p => ({ id: p.id, name: p.name })));
       }
-      
+
       // Cargar estructura de menú
       const menusResponse = await menuService.getMenus(user.restaurantId);
       const menusArray = Array.isArray(menusResponse) ? menusResponse : (menusResponse as any).menus || [];
-      
+
       if (menusArray.length > 0) {
         const menuDetail = await menuService.getMenuDetail(user.restaurantId, menusArray[0].id);
-        
+
         // Organizar productos por categoría
         const categoriesMap = new Map<string, MenuCategory>();
-        
+
         if (menuDetail.categories && Array.isArray(menuDetail.categories)) {
           console.log('[CreateOrderPage] Categorías del menú:', menuDetail.categories.map((c: any) => ({ id: c.id, name: c.name })));
-          
+
           menuDetail.categories.forEach((cat: any) => {
             const categoryProducts = products.filter(p => p.categoryId === cat.id);
-            
+
             // DEBUG: Log para cada categoría
             console.log(`[CreateOrderPage] Categoría "${cat.name}": ${categoryProducts.length} productos`);
-            
+
             // IMPORTANTE: Incluir TODAS las categorías, incluso si no tienen productos (necesario para "Adiciones")
             categoriesMap.set(cat.id, {
               id: cat.id,
@@ -216,11 +235,11 @@ export const CreateOrderPage: React.FC = () => {
             });
           });
         }
-        
+
         const sortedCategories = Array.from(categoriesMap.values()).sort((a, b) => a.displayOrder - b.displayOrder);
         console.log('[CreateOrderPage] Categorías finales cargadas:', sortedCategories.map(c => ({ id: c.id, name: c.name, itemsCount: c.items.length })));
         setCategories(sortedCategories);
-        
+
         // Seleccionar primera categoría por defecto
         if (sortedCategories.length > 0 && !selectedCategoryId) {
           setSelectedCategoryId(sortedCategories[0].id);
@@ -246,7 +265,7 @@ export const CreateOrderPage: React.FC = () => {
   const loadOrderForTable = async (orderId: string) => {
     try {
       const order = await ordersDomainService.getOrderWithItems(orderId);
-      
+
       // IMPORTANTE: Solo considerar la orden como "activa" si está en 'draft' o 'sent_to_kitchen'
       // Si está 'served', 'closed', o 'cancelled', NO debería tener activeOrderId
       if (order.status === 'served' || order.status === 'closed' || order.status === 'cancelled') {
@@ -259,14 +278,14 @@ export const CreateOrderPage: React.FC = () => {
         await loadTables();
         return;
       }
-      
+
       setCurrentOrder(order);
-      
+
       // Si la orden está en draft, cargar items al cart
       if (order.status === 'draft' && order.items.length > 0) {
         const allProducts = await productsDomainService.getActiveProducts();
         const productMap = new Map(allProducts.map(p => [p.id, p]));
-        
+
         const cartItems: CartItem[] = order.items.map(item => {
           const product = productMap.get(item.productId) || {
             id: item.productId,
@@ -275,14 +294,15 @@ export const CreateOrderPage: React.FC = () => {
             basePrice: item.priceSnapshot,
             active: true
           } as Product;
-          
+
           return {
             product,
             quantity: item.quantity,
-            notes: item.notes || undefined
+            notes: item.notes || undefined,
+            seatNumber: item.seatNumber || 1
           };
         });
-        
+
         setCart(cartItems);
       } else {
         // Si la orden está en otro estado (sent_to_kitchen, etc.), no cargar items al cart
@@ -306,7 +326,7 @@ export const CreateOrderPage: React.FC = () => {
     setSelectedTableId(table.id);
     setCart([]);
     setShowTableSelection(false); // Cambiar a vista de pedidos
-    
+
     if (table.activeOrderId) {
       // Mesa tiene orden activa - cargarla
       await loadOrderForTable(table.activeOrderId);
@@ -321,38 +341,38 @@ export const CreateOrderPage: React.FC = () => {
       toast.error(`${product.name} no está disponible`);
       return;
     }
-    
+
     // Si el producto es de la categoría "Adiciones" y hay un producto seleccionado para customizar
     const selectedCategory = categories.find(cat => cat.id === selectedCategoryId);
     const isAdditionProduct = selectedCategory?.name.toLowerCase() === 'adiciones';
-    
+
     if (isAdditionProduct && productToCustomize) {
       // Agregar como adición al producto del carrito
       const cartItemIndex = cart.findIndex(item => item.product.id === productToCustomize.id);
-      
+
       if (cartItemIndex >= 0) {
         const updatedCart = [...cart];
         const cartItem = updatedCart[cartItemIndex];
-        
+
         if (!cartItem.customization) {
           cartItem.customization = {
             excludedIngredients: [],
             additions: []
           };
         }
-        
+
         // Verificar si la adición ya existe
         const additionExists = cartItem.customization.additions.some(
           add => add.modifierId === product.id || add.name === product.name
         );
-        
+
         if (!additionExists) {
           cartItem.customization.additions.push({
             modifierId: product.id,
             name: product.name,
             priceDelta: product.basePrice
           });
-          
+
           setCart(updatedCart);
           toast.success(`${product.name} agregada como adición (+$${product.basePrice.toFixed(2)})`);
           // NO regresar automáticamente - permitir agregar más adiciones
@@ -363,7 +383,7 @@ export const CreateOrderPage: React.FC = () => {
         toast.error('Producto original no encontrado en el carrito');
         // Solo regresar si el producto original ya no existe en el carrito
         setProductToCustomize(null);
-        const previousCategory = categories.find(cat => 
+        const previousCategory = categories.find(cat =>
           cat.items.some(p => p.id === productToCustomize?.id)
         );
         if (previousCategory) {
@@ -374,19 +394,19 @@ export const CreateOrderPage: React.FC = () => {
       }
       return;
     }
-    
+
     // Flujo normal: agregar producto principal
     if (!selectedTableId) {
       toast.error('Selecciona una mesa primero');
       return;
     }
-    
+
     const selectedTable = tables.find(t => t.id === selectedTableId);
     if (!selectedTable) {
       toast.error('Mesa no encontrada');
       return;
     }
-    
+
     // Crear orden si no existe
     let order = currentOrder;
     if (!order) {
@@ -395,7 +415,7 @@ export const CreateOrderPage: React.FC = () => {
           tableId: selectedTable.id,
           waiterId: user?.id || ''
         });
-        
+
         // Crear objeto OrderWithItems local
         order = {
           id: newOrder.id,
@@ -408,7 +428,7 @@ export const CreateOrderPage: React.FC = () => {
           createdAt: newOrder.createdAt,
           items: []
         };
-        
+
         setCurrentOrder(order);
         setTimeout(() => loadTables(), 500);
       } catch (err: any) {
@@ -417,10 +437,10 @@ export const CreateOrderPage: React.FC = () => {
         return;
       }
     }
-    
+
     // Obtener ingredientes (prioriza metadata, luego parsea descripción)
     const includedIngredients = getProductIngredients(product);
-    
+
     // Agregar producto directamente al carrito con ingredientes incluidos por defecto
     const newCartItem: CartItem = {
       product,
@@ -428,11 +448,14 @@ export const CreateOrderPage: React.FC = () => {
       customization: {
         excludedIngredients: [], // Todos los ingredientes incluidos por defecto
         additions: [] // Sin adiciones por defecto
-      }
+      },
+      seatNumber: selectedSeat
     };
-    
-    // Verificar si el producto ya está en el carrito
-    const existingItemIndex = cart.findIndex(item => item.product.id === product.id);
+
+    // Verificar si el producto ya está en el carrito (para EL MISMO ASIENTO)
+    const existingItemIndex = cart.findIndex(item =>
+      item.product.id === product.id && item.seatNumber === selectedSeat
+    );
     if (existingItemIndex >= 0) {
       // Si ya existe, aumentar cantidad
       const updatedCart = [...cart];
@@ -450,7 +473,7 @@ export const CreateOrderPage: React.FC = () => {
     if (!productToCustomize) {
       return;
     }
-    
+
     // Encontrar el item en el carrito y actualizar sus adiciones
     const itemIndex = cart.findIndex(item => item.product.id === productToCustomize.id);
     if (itemIndex >= 0) {
@@ -461,7 +484,7 @@ export const CreateOrderPage: React.FC = () => {
           additions: []
         };
       }
-      
+
       // Agregar las nuevas adiciones (sin duplicar)
       customization.additions.forEach(newAdd => {
         const exists = updatedCart[itemIndex].customization!.additions.some(
@@ -471,11 +494,11 @@ export const CreateOrderPage: React.FC = () => {
           updatedCart[itemIndex].customization!.additions.push(newAdd);
         }
       });
-      
+
       setCart(updatedCart);
       toast.success('Adiciones agregadas');
     }
-    
+
     setCustomizationModalOpen(false);
     setProductToCustomize(null);
   };
@@ -485,7 +508,7 @@ export const CreateOrderPage: React.FC = () => {
       handleRemoveProduct(productId);
       return;
     }
-    
+
     setCart(cart.map(item =>
       item.product.id === productId
         ? { ...item, quantity }
@@ -496,7 +519,7 @@ export const CreateOrderPage: React.FC = () => {
   const handleRemoveProduct = (productId: string) => {
     const item = cart.find(item => item.product.id === productId);
     setCart(cart.filter(item => item.product.id !== productId));
-    
+
     if (item) {
       toast.info(`${item.product.name} eliminado`);
     }
@@ -507,22 +530,22 @@ export const CreateOrderPage: React.FC = () => {
       toast.error('No hay orden activa');
       return;
     }
-    
+
     if (cart.length === 0) {
       toast.error('Agrega productos a la orden primero');
       return;
     }
-    
+
     try {
       setSendingToKitchen(true);
-      
+
       // Eliminar todos los items actuales de la orden (si existen)
       try {
         await ordersDomainService.removeAllItemsFromOrder(currentOrder.id);
       } catch (err) {
         // Ignorar si no hay items para eliminar
       }
-      
+
       // Agregar items del cart a la orden con customizaciones
       const itemsRequest: AddItemsRequest = {
         items: cart.map(item => {
@@ -535,28 +558,29 @@ export const CreateOrderPage: React.FC = () => {
             customizationNotes.push(`Con: ${item.customization.additions.map(a => a.name).join(', ')}`);
           }
           const notes = customizationNotes.length > 0 ? customizationNotes.join(' | ') : undefined;
-          
+
           return {
             productId: item.product.id,
             quantity: item.quantity,
-            notes: notes
+            notes: notes,
+            seatNumber: item.seatNumber
           };
         })
       };
-      
+
       await ordersDomainService.addItemsToOrder(currentOrder.id, itemsRequest);
-      
+
       // Enviar a cocina
       const updatedOrder = await ordersDomainService.sendToKitchen(currentOrder.id);
-      
+
       // Recargar orden completa para obtener el estado actualizado
       const fullOrder = await ordersDomainService.getOrderWithItems(updatedOrder.id);
       setCurrentOrder(fullOrder);
-      
+
       // Verificar si hay productos de cocina y bar en la orden
       let hasKitchenItems = false;
       let hasBarItems = false;
-      
+
       for (const item of fullOrder.items) {
         // Buscar el producto en las categorías para determinar si es de cocina o bar
         for (const category of categories) {
@@ -564,11 +588,11 @@ export const CreateOrderPage: React.FC = () => {
           if (product) {
             const categoryMetadata = category.metadata || {};
             const categoryName = category.name.toLowerCase();
-            
+
             // Verificar metadata primero
             const itemType = categoryMetadata.type || categoryMetadata.location || '';
             let isBarItem = false;
-            
+
             if (itemType === 'bar' || itemType === 'drinks') {
               isBarItem = true;
             } else {
@@ -578,7 +602,7 @@ export const CreateOrderPage: React.FC = () => {
                 isBarItem = true;
               }
             }
-            
+
             if (isBarItem) {
               hasBarItems = true;
             } else {
@@ -588,7 +612,7 @@ export const CreateOrderPage: React.FC = () => {
           }
         }
       }
-      
+
       // Determinar mensaje según los tipos de productos
       let message = 'Orden enviada';
       if (hasKitchenItems && hasBarItems) {
@@ -598,13 +622,13 @@ export const CreateOrderPage: React.FC = () => {
       } else if (hasBarItems) {
         message = 'Orden enviada a bar 🍹';
       }
-      
+
       // Limpiar cart local
       setCart([]);
-      
+
       // Recargar mesas para actualizar estado
       await loadTables();
-      
+
       toast.success(message);
     } catch (err: any) {
       console.error('Error sending to kitchen:', err);
@@ -618,7 +642,7 @@ export const CreateOrderPage: React.FC = () => {
   const selectedCategory = categories.find(c => c.id === selectedCategoryId);
   const categoryProducts = selectedCategory?.items || [];
   const [showMobileCart, setShowMobileCart] = useState(false);
-  
+
   // Calcular subtotal incluyendo adiciones
   const subtotal = cart.reduce((sum, item) => {
     const basePrice = item.product.basePrice * item.quantity;
@@ -641,6 +665,13 @@ export const CreateOrderPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 relative">
+      {/* Offline Banner */}
+      {isOffline && (
+        <div className="bg-red-500 text-white px-4 py-2 text-center text-sm font-bold animate-pulse">
+          ⚠️ Modo Offline - Conexión Perdida. Los pedidos se guardarán localmente.
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white shadow-md px-4 py-3 flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
@@ -695,14 +726,14 @@ export const CreateOrderPage: React.FC = () => {
                 Elige la mesa para comenzar a tomar el pedido
               </p>
             </div>
-            
+
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
               {tables.map(table => {
-                const hasActiveOrderId = table.activeOrderId && 
-                                         typeof table.activeOrderId === 'string' && 
-                                         table.activeOrderId.trim() !== '';
+                const hasActiveOrderId = table.activeOrderId &&
+                  typeof table.activeOrderId === 'string' &&
+                  table.activeOrderId.trim() !== '';
                 const isActive = hasActiveOrderId === true;
-                
+
                 return (
                   <button
                     key={table.id}
@@ -711,8 +742,8 @@ export const CreateOrderPage: React.FC = () => {
                       relative p-4 sm:p-5 rounded-xl font-bold transition-all duration-200 active:scale-95
                       min-h-[100px] sm:min-h-[120px] flex flex-col items-center justify-center
                       shadow-lg hover:shadow-xl
-                      ${isActive 
-                        ? 'bg-gradient-to-br from-green-500 to-green-600 text-white ring-4 ring-green-300' 
+                      ${isActive
+                        ? 'bg-gradient-to-br from-green-500 to-green-600 text-white ring-4 ring-green-300'
                         : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700 border-2 border-gray-300 hover:border-indigo-400'
                       }
                     `}
@@ -747,6 +778,36 @@ export const CreateOrderPage: React.FC = () => {
                 <p className="text-xs text-gray-600 mt-1">
                   Mesa: <span className="font-semibold">{selectedTable.name}</span>
                 </p>
+              )}
+
+              {/* Selector de Asientos */}
+              {!showTableSelection && (
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+                  {Array.from({ length: maxSeat }).map((_, i) => (
+                    <button
+                      key={i + 1}
+                      onClick={() => setSelectedSeat(i + 1)}
+                      className={`
+                        px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-colors
+                        ${selectedSeat === i + 1
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}
+                      `}
+                    >
+                      Silla {i + 1}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const newSeat = maxSeat + 1;
+                      setMaxSeat(newSeat);
+                      setSelectedSeat(newSeat);
+                    }}
+                    className="px-2 py-1 rounded-full bg-gray-100 text-indigo-600 font-bold text-xs hover:bg-indigo-50 border border-indigo-200"
+                  >
+                    + Silla
+                  </button>
+                </div>
               )}
             </div>
             <div className="flex-1 overflow-y-auto p-2 sm:p-3">
@@ -798,7 +859,7 @@ export const CreateOrderPage: React.FC = () => {
                   <button
                     onClick={() => {
                       setProductToCustomize(null);
-                      const previousCategory = categories.find(cat => 
+                      const previousCategory = categories.find(cat =>
                         cat.items.some(p => p.id === productToCustomize.id)
                       );
                       if (previousCategory) {
@@ -830,16 +891,15 @@ export const CreateOrderPage: React.FC = () => {
                             transition-all duration-200 border
                             min-h-[90px] sm:min-h-[100px] flex flex-col justify-between
                             ${!product.active ? 'opacity-50' : ''}
-                            ${isAddingAdditions 
-                              ? 'bg-blue-50 border-blue-300 hover:border-blue-400' 
+                            ${isAddingAdditions
+                              ? 'bg-blue-50 border-blue-300 hover:border-blue-400'
                               : 'bg-white border-gray-200 hover:border-indigo-300'
                             }
                           `}
                         >
                           <div className="flex-1 flex flex-col justify-start">
-                            <h3 className={`font-bold text-xs sm:text-sm mb-1 line-clamp-2 min-h-[2rem] flex items-start leading-tight ${
-                              isAddingAdditions ? 'text-blue-800' : 'text-gray-800'
-                            }`}>
+                            <h3 className={`font-bold text-xs sm:text-sm mb-1 line-clamp-2 min-h-[2rem] flex items-start leading-tight ${isAddingAdditions ? 'text-blue-800' : 'text-gray-800'
+                              }`}>
                               {product.name && product.name.trim() ? (
                                 <>
                                   {isAddingAdditions && <span className="mr-1 text-xs">➕</span>}
@@ -852,17 +912,15 @@ export const CreateOrderPage: React.FC = () => {
                               )}
                             </h3>
                             {product.description && product.description.trim() && (
-                              <p className={`text-[10px] sm:text-xs line-clamp-2 leading-tight ${
-                                isAddingAdditions ? 'text-blue-600' : 'text-gray-500'
-                              }`}>
+                              <p className={`text-[10px] sm:text-xs line-clamp-2 leading-tight ${isAddingAdditions ? 'text-blue-600' : 'text-gray-500'
+                                }`}>
                                 {product.description}
                               </p>
                             )}
                           </div>
                           <div className="mt-auto pt-1 border-t border-gray-200">
-                            <p className={`font-bold text-sm sm:text-base ${
-                              isAddingAdditions ? 'text-blue-600' : 'text-indigo-600'
-                            }`}>
+                            <p className={`font-bold text-sm sm:text-base ${isAddingAdditions ? 'text-blue-600' : 'text-indigo-600'
+                              }`}>
                               {isAddingAdditions ? '+' : ''}${(product.basePrice || 0).toFixed(2)}
                             </p>
                           </div>
@@ -898,536 +956,536 @@ export const CreateOrderPage: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 sm:p-3">
-            {cart.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="text-6xl mb-4">🛒</div>
-                <p className="text-gray-600 font-medium">El carrito está vacío</p>
-                <p className="text-sm text-gray-500 mt-2">Agrega productos de la lista</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {cart.map((item, cartIndex) => {
-                  // Parsear ingredientes incluidos del producto
-                  const includedIngredients = getProductIngredients(item.product);
-                  
-                  return (
-                    <div
-                      key={item.product.id}
-                      className="bg-white rounded-lg p-2 border border-gray-300 shadow-sm"
-                    >
-                      {/* Header del producto */}
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-gray-800 text-xs mb-0.5 leading-tight">
-                            {item.product.name}
-                          </h3>
-                          {item.product.description && (
-                            <p className="text-[9px] text-gray-500 line-clamp-1">
-                              {item.product.description}
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleRemoveProduct(item.product.id)}
-                          className="ml-1 w-6 h-6 bg-red-500 text-white rounded flex items-center justify-center font-bold active:scale-95 min-h-[24px] min-w-[24px] text-[10px] flex-shrink-0"
-                        >
-                          ✕
-                        </button>
-                      </div>
-
-                      {/* Lista de ingredientes incluidos */}
-                      {includedIngredients.length > 0 && (
-                        <div className="mb-2 p-1.5 bg-gray-50 rounded border border-gray-200">
-                          <p className="text-[9px] font-semibold text-gray-700 mb-1">🍽️ Incluye:</p>
-                          <div className="space-y-1">
-                            {includedIngredients.map((ingredient, idx) => {
-                              const isExcluded = item.customization?.excludedIngredients.includes(ingredient) || false;
-                              return (
-                                <label
-                                  key={idx}
-                                  className={`
-                                    flex items-center gap-1 p-1 rounded cursor-pointer transition-all
-                                    min-h-[28px] active:scale-95
-                                    ${isExcluded 
-                                      ? 'bg-red-50 border border-red-200' 
-                                      : 'bg-green-50 border border-green-200'
-                                    }
-                                  `}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={!isExcluded}
-                                    onChange={() => {
-                                      const updatedCart = [...cart];
-                                      const currentItem = updatedCart[cartIndex];
-                                      
-                                      if (!currentItem.customization) {
-                                        currentItem.customization = {
-                                          excludedIngredients: [],
-                                          additions: []
-                                        };
-                                      }
-                                      
-                                      if (isExcluded) {
-                                        // Quitar de excluidos (incluir ingrediente)
-                                        currentItem.customization.excludedIngredients = 
-                                          currentItem.customization.excludedIngredients.filter(ing => ing !== ingredient);
-                                      } else {
-                                        // Agregar a excluidos (quitar ingrediente)
-                                        if (!currentItem.customization.excludedIngredients.includes(ingredient)) {
-                                          currentItem.customization.excludedIngredients.push(ingredient);
-                                        }
-                                      }
-                                      
-                                      setCart(updatedCart);
-                                    }}
-                                    className="w-3 h-3 rounded border border-gray-300 checked:bg-green-500 checked:border-green-500 cursor-pointer flex-shrink-0"
-                                  />
-                                  <span className={`text-[9px] font-medium flex-1 leading-tight ${isExcluded ? 'text-red-600 line-through' : 'text-green-700'}`}>
-                                    {ingredient}
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Botón para agregar adiciones */}
-                      <div className="mb-2">
-                        <button
-                          onClick={() => {
-                            // Debug: Log categorías disponibles
-                            console.log('[CreateOrderPage] Total categorías disponibles:', categories.length);
-                            console.log('[CreateOrderPage] Nombres de categorías:', categories.map(c => c.name));
-                            console.log('[CreateOrderPage] Categorías con detalles:', categories.map(c => ({ id: c.id, name: c.name, itemsCount: c.items.length })));
-                            
-                            // Buscar categoría "Adiciones" (búsqueda más flexible)
-                            const adicionesCategory = categories.find(cat => {
-                              const normalizedName = cat.name.toLowerCase().trim();
-                              // Normalizar nombres comunes
-                              return normalizedName === 'adiciones' || 
-                                     normalizedName === 'adición' || 
-                                     normalizedName === 'adicion' ||
-                                     normalizedName === 'adicione' ||
-                                     normalizedName.includes('adicione') ||
-                                     normalizedName.startsWith('adicione');
-                            });
-                            
-                            if (adicionesCategory) {
-                              console.log('[CreateOrderPage] ✅ Categoría "Adiciones" encontrada:', {
-                                id: adicionesCategory.id,
-                                name: adicionesCategory.name,
-                                itemsCount: adicionesCategory.items.length,
-                                items: adicionesCategory.items.map(i => ({ id: i.id, name: i.name }))
-                              });
-                              // Cambiar la vista para mostrar productos de "Adiciones"
-                              setSelectedCategoryId(adicionesCategory.id);
-                              // Guardar referencia al item del carrito para agregar adiciones
-                              setProductToCustomize(item.product);
-                              toast.info(`Selecciona las adiciones del menú (${adicionesCategory.items.length} disponibles)`);
-                            } else {
-                              console.error('[CreateOrderPage] ❌ Categoría "Adiciones" NO encontrada');
-                              console.error('[CreateOrderPage] Categorías disponibles:', categories.map(c => ({ id: c.id, name: c.name, itemsCount: c.items.length })));
-                              toast.error(`Categoría "Adiciones" no encontrada. Categorías disponibles: ${categories.map(c => c.name).join(', ')}. Por favor, ejecuta el seed nuevamente.`);
-                            }
-                          }}
-                          className="w-full py-1.5 px-2 bg-blue-500 text-white rounded font-semibold text-[10px] flex items-center justify-center gap-1 active:scale-95 min-h-[32px] hover:bg-blue-600 transition"
-                        >
-                          <span className="text-xs">➕</span>
-                          <span>Adiciones</span>
-                        </button>
-                      </div>
-
-                      {/* Mostrar adiciones agregadas */}
-                      {item.customization && item.customization.additions.length > 0 && (
-                        <div className="mb-2 p-1.5 bg-blue-50 border border-blue-200 rounded">
-                          <p className="text-[9px] font-semibold text-blue-700 mb-1">➕ Adiciones:</p>
-                          <div className="space-y-0.5">
-                            {item.customization.additions.map((add, idx) => (
-                              <div key={idx} className="flex items-center justify-between text-[9px]">
-                                <span className="text-blue-600 truncate flex-1 min-w-0">{add.name}</span>
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                  <span className="text-blue-700 font-semibold">+${add.priceDelta.toFixed(2)}</span>
-                                  <button
-                                    onClick={() => {
-                                      const updatedCart = [...cart];
-                                      const currentItem = updatedCart[cartIndex];
-                                      if (currentItem.customization) {
-                                        currentItem.customization.additions = 
-                                          currentItem.customization.additions.filter((_, i) => i !== idx);
-                                        setCart(updatedCart);
-                                      }
-                                    }}
-                                    className="w-4 h-4 bg-red-400 text-white rounded flex items-center justify-center text-[8px] active:scale-95 flex-shrink-0"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Controles de cantidad y precio */}
-                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleUpdateQuantity(item.product.id, item.quantity - 1)}
-                            className="w-7 h-7 bg-red-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
-                          >
-                            −
-                          </button>
-                          <span className="w-8 text-center font-bold text-xs bg-indigo-100 text-indigo-700 rounded py-1">
-                            {item.quantity}
-                          </span>
-                          <button
-                            onClick={() => handleUpdateQuantity(item.product.id, item.quantity + 1)}
-                            className="w-7 h-7 bg-green-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
-                          >
-                            +
-                          </button>
-                        </div>
-                        <span className="font-bold text-indigo-600 text-xs">
-                          ${(() => {
-                            const basePrice = item.product.basePrice * item.quantity;
-                            const additionsPrice = (item.customization?.additions.reduce((sum, add) => sum + add.priceDelta, 0) || 0) * item.quantity;
-                            return (basePrice + additionsPrice).toFixed(2);
-                          })()}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Mostrar items ya enviados a cocina */}
-            {currentOrder && currentOrder.status !== 'draft' && currentOrder.items.length > 0 && (
-              <div className="mt-6 pt-6 border-t-2 border-gray-300">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-bold text-gray-800">
-                    {currentOrder.status === 'served' ? '✅ Pedidos Entregados' : 'En Preparación:'}
-                  </h3>
-                  {currentOrder.status === 'served' && (
-                    <span className="px-3 py-1 rounded-full bg-green-500 text-white text-xs font-bold">
-                      Entregado
-                    </span>
-                  )}
+              {cart.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">🛒</div>
+                  <p className="text-gray-600 font-medium">El carrito está vacío</p>
+                  <p className="text-sm text-gray-500 mt-2">Agrega productos de la lista</p>
                 </div>
+              ) : (
                 <div className="space-y-2">
-                  {currentOrder.items.map(item => {
-                    // Determinar si el item es de bar o cocina
-                    let isBarItem = false;
-                    for (const category of categories) {
-                      const product = category.items.find(p => p.id === item.productId);
-                      if (product) {
-                        const categoryMetadata = category.metadata || {};
-                        const categoryName = category.name.toLowerCase();
-                        
-                        // Verificar metadata primero
-                        const itemType = categoryMetadata.type || categoryMetadata.location || '';
-                        if (itemType === 'bar' || itemType === 'drinks') {
-                          isBarItem = true;
-                        } else {
-                          // Si no hay metadata, verificar por nombre de categoría
-                          // Categorías comunes de bar: Bebidas, Cocteles, Bar, Drinks, etc.
-                          const barCategoryNames = ['bebida', 'bebidas', 'coctel', 'cocteles', 'bar', 'drinks', 'cocktail', 'cocktails', 'cerveza', 'cervezas', 'vino', 'vinos', 'licor', 'licores'];
-                          if (barCategoryNames.some(name => categoryName.includes(name))) {
-                            isBarItem = true;
-                          }
-                        }
-                        break;
-                      }
-                    }
-                    
-                    // Colores y estilos según si es de cocina o bar
-                    const getItemStyles = () => {
-                      if (item.status === 'served') {
-                        return 'bg-green-50 border-green-400 shadow-md';
-                      } else if (item.status === 'prepared') {
-                        return isBarItem 
-                          ? 'bg-green-100 border-green-300' 
-                          : 'bg-green-100 border-green-300';
-                      } else if (item.status === 'sent') {
-                        return isBarItem 
-                          ? 'bg-blue-50 border-blue-300' 
-                          : 'bg-orange-50 border-orange-300';
-                      }
-                      return 'bg-gray-50 border-gray-200';
-                    };
-                    
-                    const getBadgeStyles = () => {
-                      if (item.status === 'served') {
-                        return 'bg-green-500 text-white shadow-lg';
-                      } else if (item.status === 'prepared') {
-                        return 'bg-green-400 text-white';
-                      } else if (item.status === 'sent') {
-                        return isBarItem 
-                          ? 'bg-blue-500 text-white' 
-                          : 'bg-orange-500 text-white';
-                      }
-                      return 'bg-gray-300 text-gray-700';
-                    };
-                    
-                    const getStatusText = () => {
-                      if (item.status === 'served') {
-                        return '✅ Entregado';
-                      } else if (item.status === 'prepared') {
-                        return '✓ Listo';
-                      } else if (item.status === 'sent') {
-                        return isBarItem ? '🍹 En Bar' : '🍳 En Cocina';
-                      }
-                      return '⏸️ Pendiente';
-                    };
-                    
+                  {cart.map((item, cartIndex) => {
+                    // Parsear ingredientes incluidos del producto
+                    const includedIngredients = getProductIngredients(item.product);
+
                     return (
                       <div
-                        key={item.id}
-                        className={`rounded-lg p-3 border-2 transition-all duration-200 ${getItemStyles()}`}
+                        key={item.product.id}
+                        className="bg-white rounded-lg p-2 border border-gray-300 shadow-sm"
                       >
-                        <div className="flex justify-between items-center gap-2">
+                        {/* Header del producto */}
+                        <div className="flex items-start justify-between mb-2">
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-gray-800 text-sm truncate">
-                              {item.productName || (item.productId ? `Producto ${item.productId.substring(0, 8)}` : 'Producto')}
-                            </p>
-                            <p className="text-xs text-gray-600 mt-1">
-                              Cantidad: <span className="font-bold text-base">{item.quantity}</span>
-                            </p>
-                            {item.notes && (
-                              <p className="text-xs text-gray-500 italic mt-1 truncate">
-                                📝 {item.notes}
+                            <h3 className="font-bold text-gray-800 text-xs mb-0.5 leading-tight">
+                              {item.product.name}
+                            </h3>
+                            {item.product.description && (
+                              <p className="text-[9px] text-gray-500 line-clamp-1">
+                                {item.product.description}
                               </p>
                             )}
                           </div>
-                          <span className={`px-2 py-1.5 rounded-lg text-xs font-bold min-w-[90px] text-center flex-shrink-0 ${getBadgeStyles()}`}>
-                            {getStatusText()}
+                          <button
+                            onClick={() => handleRemoveProduct(item.product.id)}
+                            className="ml-1 w-6 h-6 bg-red-500 text-white rounded flex items-center justify-center font-bold active:scale-95 min-h-[24px] min-w-[24px] text-[10px] flex-shrink-0"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        {/* Lista de ingredientes incluidos */}
+                        {includedIngredients.length > 0 && (
+                          <div className="mb-2 p-1.5 bg-gray-50 rounded border border-gray-200">
+                            <p className="text-[9px] font-semibold text-gray-700 mb-1">🍽️ Incluye:</p>
+                            <div className="space-y-1">
+                              {includedIngredients.map((ingredient, idx) => {
+                                const isExcluded = item.customization?.excludedIngredients.includes(ingredient) || false;
+                                return (
+                                  <label
+                                    key={idx}
+                                    className={`
+                                    flex items-center gap-1 p-1 rounded cursor-pointer transition-all
+                                    min-h-[28px] active:scale-95
+                                    ${isExcluded
+                                        ? 'bg-red-50 border border-red-200'
+                                        : 'bg-green-50 border border-green-200'
+                                      }
+                                  `}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={!isExcluded}
+                                      onChange={() => {
+                                        const updatedCart = [...cart];
+                                        const currentItem = updatedCart[cartIndex];
+
+                                        if (!currentItem.customization) {
+                                          currentItem.customization = {
+                                            excludedIngredients: [],
+                                            additions: []
+                                          };
+                                        }
+
+                                        if (isExcluded) {
+                                          // Quitar de excluidos (incluir ingrediente)
+                                          currentItem.customization.excludedIngredients =
+                                            currentItem.customization.excludedIngredients.filter(ing => ing !== ingredient);
+                                        } else {
+                                          // Agregar a excluidos (quitar ingrediente)
+                                          if (!currentItem.customization.excludedIngredients.includes(ingredient)) {
+                                            currentItem.customization.excludedIngredients.push(ingredient);
+                                          }
+                                        }
+
+                                        setCart(updatedCart);
+                                      }}
+                                      className="w-3 h-3 rounded border border-gray-300 checked:bg-green-500 checked:border-green-500 cursor-pointer flex-shrink-0"
+                                    />
+                                    <span className={`text-[9px] font-medium flex-1 leading-tight ${isExcluded ? 'text-red-600 line-through' : 'text-green-700'}`}>
+                                      {ingredient}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Botón para agregar adiciones */}
+                        <div className="mb-2">
+                          <button
+                            onClick={() => {
+                              // Debug: Log categorías disponibles
+                              console.log('[CreateOrderPage] Total categorías disponibles:', categories.length);
+                              console.log('[CreateOrderPage] Nombres de categorías:', categories.map(c => c.name));
+                              console.log('[CreateOrderPage] Categorías con detalles:', categories.map(c => ({ id: c.id, name: c.name, itemsCount: c.items.length })));
+
+                              // Buscar categoría "Adiciones" (búsqueda más flexible)
+                              const adicionesCategory = categories.find(cat => {
+                                const normalizedName = cat.name.toLowerCase().trim();
+                                // Normalizar nombres comunes
+                                return normalizedName === 'adiciones' ||
+                                  normalizedName === 'adición' ||
+                                  normalizedName === 'adicion' ||
+                                  normalizedName === 'adicione' ||
+                                  normalizedName.includes('adicione') ||
+                                  normalizedName.startsWith('adicione');
+                              });
+
+                              if (adicionesCategory) {
+                                console.log('[CreateOrderPage] ✅ Categoría "Adiciones" encontrada:', {
+                                  id: adicionesCategory.id,
+                                  name: adicionesCategory.name,
+                                  itemsCount: adicionesCategory.items.length,
+                                  items: adicionesCategory.items.map(i => ({ id: i.id, name: i.name }))
+                                });
+                                // Cambiar la vista para mostrar productos de "Adiciones"
+                                setSelectedCategoryId(adicionesCategory.id);
+                                // Guardar referencia al item del carrito para agregar adiciones
+                                setProductToCustomize(item.product);
+                                toast.info(`Selecciona las adiciones del menú (${adicionesCategory.items.length} disponibles)`);
+                              } else {
+                                console.error('[CreateOrderPage] ❌ Categoría "Adiciones" NO encontrada');
+                                console.error('[CreateOrderPage] Categorías disponibles:', categories.map(c => ({ id: c.id, name: c.name, itemsCount: c.items.length })));
+                                toast.error(`Categoría "Adiciones" no encontrada. Categorías disponibles: ${categories.map(c => c.name).join(', ')}. Por favor, ejecuta el seed nuevamente.`);
+                              }
+                            }}
+                            className="w-full py-1.5 px-2 bg-blue-500 text-white rounded font-semibold text-[10px] flex items-center justify-center gap-1 active:scale-95 min-h-[32px] hover:bg-blue-600 transition"
+                          >
+                            <span className="text-xs">➕</span>
+                            <span>Adiciones</span>
+                          </button>
+                        </div>
+
+                        {/* Mostrar adiciones agregadas */}
+                        {item.customization && item.customization.additions.length > 0 && (
+                          <div className="mb-2 p-1.5 bg-blue-50 border border-blue-200 rounded">
+                            <p className="text-[9px] font-semibold text-blue-700 mb-1">➕ Adiciones:</p>
+                            <div className="space-y-0.5">
+                              {item.customization.additions.map((add, idx) => (
+                                <div key={idx} className="flex items-center justify-between text-[9px]">
+                                  <span className="text-blue-600 truncate flex-1 min-w-0">{add.name}</span>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <span className="text-blue-700 font-semibold">+${add.priceDelta.toFixed(2)}</span>
+                                    <button
+                                      onClick={() => {
+                                        const updatedCart = [...cart];
+                                        const currentItem = updatedCart[cartIndex];
+                                        if (currentItem.customization) {
+                                          currentItem.customization.additions =
+                                            currentItem.customization.additions.filter((_, i) => i !== idx);
+                                          setCart(updatedCart);
+                                        }
+                                      }}
+                                      className="w-4 h-4 bg-red-400 text-white rounded flex items-center justify-center text-[8px] active:scale-95 flex-shrink-0"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Controles de cantidad y precio */}
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleUpdateQuantity(item.product.id, item.quantity - 1)}
+                              className="w-7 h-7 bg-red-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
+                            >
+                              −
+                            </button>
+                            <span className="w-8 text-center font-bold text-xs bg-indigo-100 text-indigo-700 rounded py-1">
+                              {item.quantity}
+                            </span>
+                            <button
+                              onClick={() => handleUpdateQuantity(item.product.id, item.quantity + 1)}
+                              className="w-7 h-7 bg-green-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <span className="font-bold text-indigo-600 text-xs">
+                            ${(() => {
+                              const basePrice = item.product.basePrice * item.quantity;
+                              const additionsPrice = (item.customization?.additions.reduce((sum, add) => sum + add.priceDelta, 0) || 0) * item.quantity;
+                              return (basePrice + additionsPrice).toFixed(2);
+                            })()}
                           </span>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-                {currentOrder.status === 'served' && (
-                  <div className="mt-4 p-3 bg-green-100 border-2 border-green-400 rounded-lg">
-                    <p className="text-green-800 font-bold text-sm text-center">
-                      ✅ Todos los pedidos de cocina han sido entregados
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-            </div>
-
-            {/* Resumen y Botones - Fijo en la parte inferior */}
-            {cart.length > 0 && (
-              <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
-              <div className="space-y-2 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Subtotal:</span>
-                  <span className="font-semibold">${subtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">IVA (10%):</span>
-                  <span className="font-semibold">${tax.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-lg font-bold border-t border-gray-300 pt-2">
-                  <span>Total:</span>
-                  <span className="text-indigo-600">${total.toFixed(2)}</span>
-                </div>
-              </div>
-              
-              {/* Solo mostrar botón si la orden está en draft o si no hay orden aún */}
-              {(!currentOrder || currentOrder.status === 'draft') && (
-                <button
-                  onClick={handleSendToKitchen}
-                  disabled={sendingToKitchen || (!currentOrder && cart.length === 0)}
-                  className={`
-                    w-full py-4 rounded-xl font-bold text-lg transition-all duration-200
-                    min-h-[52px] active:scale-95
-                    ${sendingToKitchen || (!currentOrder && cart.length === 0)
-                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg hover:shadow-xl'
-                    }
-                  `}
-                >
-                  {sendingToKitchen ? 'Enviando...' : 'Enviar a Cocina y/o Bar 🍳🍹'}
-                </button>
               )}
-              
-              {/* Mostrar mensaje si la orden ya fue enviada */}
-              {currentOrder && currentOrder.status !== 'draft' && (
-                <div className="p-3 bg-blue-50 border-2 border-blue-300 rounded-lg text-center">
-                  <p className="text-blue-800 font-semibold text-sm">
-                    {currentOrder.status === 'sent_to_kitchen' ? '⏳ Orden enviada a cocina' :
-                     currentOrder.status === 'served' ? '✅ Orden servida' :
-                     `Estado: ${currentOrder.status}`}
-                  </p>
-                  {currentOrder.status === 'sent_to_kitchen' && (
-                    <p className="text-xs text-blue-600 mt-1">
-                      Los productos ya están siendo preparados
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          
-          {/* Mostrar mensaje cuando orden está servida */}
-          {currentOrder && currentOrder.status === 'served' && currentOrder.items.length > 0 && (
-            <div className="p-4 border-t border-gray-200 bg-green-50">
-              <div className="text-center p-4 bg-green-100 border-2 border-green-400 rounded-xl">
-                <div className="text-4xl mb-2">✅</div>
-                <p className="font-bold text-green-800 text-base mb-1">
-                  Pedidos Entregados
-                </p>
-                <p className="text-sm text-green-700">
-                  La cocina ha entregado todos los pedidos
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
 
-        {/* Panel de Carrito Móvil - Overlay */}
-        {showMobileCart && (
-          <>
-            <div 
-              className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
-              onClick={() => setShowMobileCart(false)}
-            ></div>
-            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-300 z-50 max-h-[70vh] flex flex-col rounded-t-xl">
-              <div className="p-3 bg-gradient-to-r from-indigo-600 to-purple-600 flex items-center justify-between rounded-t-xl">
-                <h2 className="text-lg font-bold text-white">Orden Activa ({cart.length})</h2>
-                <button
-                  onClick={() => setShowMobileCart(false)}
-                  className="w-8 h-8 bg-white/20 text-white rounded-full flex items-center justify-center font-bold active:scale-95"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-3">
-                {cart.length === 0 ? (
-                  <div className="text-center py-8">
-                    <div className="text-4xl mb-2">🛒</div>
-                    <p className="text-gray-600 font-medium text-sm">El carrito está vacío</p>
+              {/* Mostrar items ya enviados a cocina */}
+              {currentOrder && currentOrder.status !== 'draft' && currentOrder.items.length > 0 && (
+                <div className="mt-6 pt-6 border-t-2 border-gray-300">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-bold text-gray-800">
+                      {currentOrder.status === 'served' ? '✅ Pedidos Entregados' : 'En Preparación:'}
+                    </h3>
+                    {currentOrder.status === 'served' && (
+                      <span className="px-3 py-1 rounded-full bg-green-500 text-white text-xs font-bold">
+                        Entregado
+                      </span>
+                    )}
                   </div>
-                ) : (
                   <div className="space-y-2">
-                    {cart.map((item, cartIndex) => {
-                      const includedIngredients = getProductIngredients(item.product);
+                    {currentOrder.items.map(item => {
+                      // Determinar si el item es de bar o cocina
+                      let isBarItem = false;
+                      for (const category of categories) {
+                        const product = category.items.find(p => p.id === item.productId);
+                        if (product) {
+                          const categoryMetadata = category.metadata || {};
+                          const categoryName = category.name.toLowerCase();
+
+                          // Verificar metadata primero
+                          const itemType = categoryMetadata.type || categoryMetadata.location || '';
+                          if (itemType === 'bar' || itemType === 'drinks') {
+                            isBarItem = true;
+                          } else {
+                            // Si no hay metadata, verificar por nombre de categoría
+                            // Categorías comunes de bar: Bebidas, Cocteles, Bar, Drinks, etc.
+                            const barCategoryNames = ['bebida', 'bebidas', 'coctel', 'cocteles', 'bar', 'drinks', 'cocktail', 'cocktails', 'cerveza', 'cervezas', 'vino', 'vinos', 'licor', 'licores'];
+                            if (barCategoryNames.some(name => categoryName.includes(name))) {
+                              isBarItem = true;
+                            }
+                          }
+                          break;
+                        }
+                      }
+
+                      // Colores y estilos según si es de cocina o bar
+                      const getItemStyles = () => {
+                        if (item.status === 'served') {
+                          return 'bg-green-50 border-green-400 shadow-md';
+                        } else if (item.status === 'prepared') {
+                          return isBarItem
+                            ? 'bg-green-100 border-green-300'
+                            : 'bg-green-100 border-green-300';
+                        } else if (item.status === 'sent') {
+                          return isBarItem
+                            ? 'bg-blue-50 border-blue-300'
+                            : 'bg-orange-50 border-orange-300';
+                        }
+                        return 'bg-gray-50 border-gray-200';
+                      };
+
+                      const getBadgeStyles = () => {
+                        if (item.status === 'served') {
+                          return 'bg-green-500 text-white shadow-lg';
+                        } else if (item.status === 'prepared') {
+                          return 'bg-green-400 text-white';
+                        } else if (item.status === 'sent') {
+                          return isBarItem
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-orange-500 text-white';
+                        }
+                        return 'bg-gray-300 text-gray-700';
+                      };
+
+                      const getStatusText = () => {
+                        if (item.status === 'served') {
+                          return '✅ Entregado';
+                        } else if (item.status === 'prepared') {
+                          return '✓ Listo';
+                        } else if (item.status === 'sent') {
+                          return isBarItem ? '🍹 En Bar' : '🍳 En Cocina';
+                        }
+                        return '⏸️ Pendiente';
+                      };
+
                       return (
                         <div
-                          key={item.product.id}
-                          className="bg-white rounded-lg p-2 border border-gray-300 shadow-sm"
+                          key={item.id}
+                          className={`rounded-lg p-3 border-2 transition-all duration-200 ${getItemStyles()}`}
                         >
-                          <div className="flex items-start justify-between mb-2">
+                          <div className="flex justify-between items-center gap-2">
                             <div className="flex-1 min-w-0">
-                              <h3 className="font-bold text-gray-800 text-xs mb-0.5 leading-tight">
-                                {item.product.name}
-                              </h3>
+                              <p className="font-semibold text-gray-800 text-sm truncate">
+                                {item.productName || (item.productId ? `Producto ${item.productId.substring(0, 8)}` : 'Producto')}
+                              </p>
+                              <p className="text-xs text-gray-600 mt-1">
+                                Cantidad: <span className="font-bold text-base">{item.quantity}</span>
+                              </p>
+                              {item.notes && (
+                                <p className="text-xs text-gray-500 italic mt-1 truncate">
+                                  📝 {item.notes}
+                                </p>
+                              )}
                             </div>
-                            <button
-                              onClick={() => handleRemoveProduct(item.product.id)}
-                              className="ml-1 w-6 h-6 bg-red-500 text-white rounded flex items-center justify-center font-bold active:scale-95 min-h-[24px] min-w-[24px] text-[10px] flex-shrink-0"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                          {includedIngredients.length > 0 && (
-                            <div className="mb-2 p-1.5 bg-gray-50 rounded border border-gray-200">
-                              <p className="text-[9px] font-semibold text-gray-700 mb-1">🍽️ Incluye:</p>
-                              <div className="space-y-1">
-                                {includedIngredients.slice(0, 3).map((ingredient, idx) => {
-                                  const isExcluded = item.customization?.excludedIngredients.includes(ingredient) || false;
-                                  return (
-                                    <div
-                                      key={idx}
-                                      className={`text-[9px] p-1 rounded ${isExcluded ? 'bg-red-50 text-red-600 line-through' : 'bg-green-50 text-green-700'}`}
-                                    >
-                                      {ingredient}
-                                    </div>
-                                  );
-                                })}
-                                {includedIngredients.length > 3 && (
-                                  <p className="text-[8px] text-gray-500">+{includedIngredients.length - 3} más</p>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => handleUpdateQuantity(item.product.id, item.quantity - 1)}
-                                className="w-7 h-7 bg-red-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
-                              >
-                                −
-                              </button>
-                              <span className="w-8 text-center font-bold text-xs bg-indigo-100 text-indigo-700 rounded py-1">
-                                {item.quantity}
-                              </span>
-                              <button
-                                onClick={() => handleUpdateQuantity(item.product.id, item.quantity + 1)}
-                                className="w-7 h-7 bg-green-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
-                              >
-                                +
-                              </button>
-                            </div>
-                            <span className="font-bold text-indigo-600 text-xs">
-                              ${(() => {
-                                const basePrice = item.product.basePrice * item.quantity;
-                                const additionsPrice = (item.customization?.additions.reduce((sum, add) => sum + add.priceDelta, 0) || 0) * item.quantity;
-                                return (basePrice + additionsPrice).toFixed(2);
-                              })()}
+                            <span className={`px-2 py-1.5 rounded-lg text-xs font-bold min-w-[90px] text-center flex-shrink-0 ${getBadgeStyles()}`}>
+                              {getStatusText()}
                             </span>
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </div>
-              {cart.length > 0 && (
-                <div className="p-3 border-t border-gray-200 bg-gray-50">
-                  <div className="space-y-2 mb-3">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-600">Subtotal:</span>
-                      <span className="font-semibold">${subtotal.toFixed(2)}</span>
+                  {currentOrder.status === 'served' && (
+                    <div className="mt-4 p-3 bg-green-100 border-2 border-green-400 rounded-lg">
+                      <p className="text-green-800 font-bold text-sm text-center">
+                        ✅ Todos los pedidos de cocina han sido entregados
+                      </p>
                     </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-600">IVA (10%):</span>
-                      <span className="font-semibold">${tax.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm font-bold border-t border-gray-300 pt-2">
-                      <span>Total:</span>
-                      <span className="text-indigo-600">${total.toFixed(2)}</span>
-                    </div>
-                  </div>
-                  {(!currentOrder || currentOrder.status === 'draft') && (
-                    <button
-                      onClick={() => {
-                        handleSendToKitchen();
-                        setShowMobileCart(false);
-                      }}
-                      disabled={sendingToKitchen}
-                      className={`
-                        w-full py-3 rounded-xl font-bold text-base transition-all duration-200
-                        min-h-[48px] active:scale-95
-                        ${sendingToKitchen
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg'
-                        }
-                      `}
-                    >
-                      {sendingToKitchen ? 'Enviando...' : 'Enviar a Cocina y/o Bar 🍳🍹'}
-                    </button>
                   )}
                 </div>
               )}
             </div>
-          </>
-        )}
+
+            {/* Resumen y Botones - Fijo en la parte inferior */}
+            {cart.length > 0 && (
+              <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+                <div className="space-y-2 mb-4">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Subtotal:</span>
+                    <span className="font-semibold">${subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">IVA (10%):</span>
+                    <span className="font-semibold">${tax.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-lg font-bold border-t border-gray-300 pt-2">
+                    <span>Total:</span>
+                    <span className="text-indigo-600">${total.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {/* Solo mostrar botón si la orden está en draft o si no hay orden aún */}
+                {(!currentOrder || currentOrder.status === 'draft') && (
+                  <button
+                    onClick={handleSendToKitchen}
+                    disabled={sendingToKitchen || (!currentOrder && cart.length === 0)}
+                    className={`
+                    w-full py-4 rounded-xl font-bold text-lg transition-all duration-200
+                    min-h-[52px] active:scale-95
+                    ${sendingToKitchen || (!currentOrder && cart.length === 0)
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg hover:shadow-xl'
+                      }
+                  `}
+                  >
+                    {sendingToKitchen ? 'Enviando...' : 'Enviar a Cocina y/o Bar 🍳🍹'}
+                  </button>
+                )}
+
+                {/* Mostrar mensaje si la orden ya fue enviada */}
+                {currentOrder && currentOrder.status !== 'draft' && (
+                  <div className="p-3 bg-blue-50 border-2 border-blue-300 rounded-lg text-center">
+                    <p className="text-blue-800 font-semibold text-sm">
+                      {currentOrder.status === 'sent_to_kitchen' ? '⏳ Orden enviada a cocina' :
+                        currentOrder.status === 'served' ? '✅ Orden servida' :
+                          `Estado: ${currentOrder.status}`}
+                    </p>
+                    {currentOrder.status === 'sent_to_kitchen' && (
+                      <p className="text-xs text-blue-600 mt-1">
+                        Los productos ya están siendo preparados
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Mostrar mensaje cuando orden está servida */}
+            {currentOrder && currentOrder.status === 'served' && currentOrder.items.length > 0 && (
+              <div className="p-4 border-t border-gray-200 bg-green-50">
+                <div className="text-center p-4 bg-green-100 border-2 border-green-400 rounded-xl">
+                  <div className="text-4xl mb-2">✅</div>
+                  <p className="font-bold text-green-800 text-base mb-1">
+                    Pedidos Entregados
+                  </p>
+                  <p className="text-sm text-green-700">
+                    La cocina ha entregado todos los pedidos
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Panel de Carrito Móvil - Overlay */}
+          {showMobileCart && (
+            <>
+              <div
+                className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
+                onClick={() => setShowMobileCart(false)}
+              ></div>
+              <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-300 z-50 max-h-[70vh] flex flex-col rounded-t-xl">
+                <div className="p-3 bg-gradient-to-r from-indigo-600 to-purple-600 flex items-center justify-between rounded-t-xl">
+                  <h2 className="text-lg font-bold text-white">Orden Activa ({cart.length})</h2>
+                  <button
+                    onClick={() => setShowMobileCart(false)}
+                    className="w-8 h-8 bg-white/20 text-white rounded-full flex items-center justify-center font-bold active:scale-95"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3">
+                  {cart.length === 0 ? (
+                    <div className="text-center py-8">
+                      <div className="text-4xl mb-2">🛒</div>
+                      <p className="text-gray-600 font-medium text-sm">El carrito está vacío</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {cart.map((item, cartIndex) => {
+                        const includedIngredients = getProductIngredients(item.product);
+                        return (
+                          <div
+                            key={item.product.id}
+                            className="bg-white rounded-lg p-2 border border-gray-300 shadow-sm"
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-bold text-gray-800 text-xs mb-0.5 leading-tight">
+                                  {item.product.name}
+                                </h3>
+                              </div>
+                              <button
+                                onClick={() => handleRemoveProduct(item.product.id)}
+                                className="ml-1 w-6 h-6 bg-red-500 text-white rounded flex items-center justify-center font-bold active:scale-95 min-h-[24px] min-w-[24px] text-[10px] flex-shrink-0"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            {includedIngredients.length > 0 && (
+                              <div className="mb-2 p-1.5 bg-gray-50 rounded border border-gray-200">
+                                <p className="text-[9px] font-semibold text-gray-700 mb-1">🍽️ Incluye:</p>
+                                <div className="space-y-1">
+                                  {includedIngredients.slice(0, 3).map((ingredient, idx) => {
+                                    const isExcluded = item.customization?.excludedIngredients.includes(ingredient) || false;
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`text-[9px] p-1 rounded ${isExcluded ? 'bg-red-50 text-red-600 line-through' : 'bg-green-50 text-green-700'}`}
+                                      >
+                                        {ingredient}
+                                      </div>
+                                    );
+                                  })}
+                                  {includedIngredients.length > 3 && (
+                                    <p className="text-[8px] text-gray-500">+{includedIngredients.length - 3} más</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => handleUpdateQuantity(item.product.id, item.quantity - 1)}
+                                  className="w-7 h-7 bg-red-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
+                                >
+                                  −
+                                </button>
+                                <span className="w-8 text-center font-bold text-xs bg-indigo-100 text-indigo-700 rounded py-1">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  onClick={() => handleUpdateQuantity(item.product.id, item.quantity + 1)}
+                                  className="w-7 h-7 bg-green-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <span className="font-bold text-indigo-600 text-xs">
+                                ${(() => {
+                                  const basePrice = item.product.basePrice * item.quantity;
+                                  const additionsPrice = (item.customization?.additions.reduce((sum, add) => sum + add.priceDelta, 0) || 0) * item.quantity;
+                                  return (basePrice + additionsPrice).toFixed(2);
+                                })()}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                {cart.length > 0 && (
+                  <div className="p-3 border-t border-gray-200 bg-gray-50">
+                    <div className="space-y-2 mb-3">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">Subtotal:</span>
+                        <span className="font-semibold">${subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">IVA (10%):</span>
+                        <span className="font-semibold">${tax.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-bold border-t border-gray-300 pt-2">
+                        <span>Total:</span>
+                        <span className="text-indigo-600">${total.toFixed(2)}</span>
+                      </div>
+                    </div>
+                    {(!currentOrder || currentOrder.status === 'draft') && (
+                      <button
+                        onClick={() => {
+                          handleSendToKitchen();
+                          setShowMobileCart(false);
+                        }}
+                        disabled={sendingToKitchen}
+                        className={`
+                        w-full py-3 rounded-xl font-bold text-base transition-all duration-200
+                        min-h-[48px] active:scale-95
+                        ${sendingToKitchen
+                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg'
+                          }
+                      `}
+                      >
+                        {sendingToKitchen ? 'Enviando...' : 'Enviar a Cocina y/o Bar 🍳🍹'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1456,7 +1514,7 @@ const getProductIngredients = (product: Product): string[] => {
   if (product.metadata && product.metadata.ingredients && Array.isArray(product.metadata.ingredients)) {
     return product.metadata.ingredients.map((ing: any) => String(ing));
   }
-  
+
   // 2. Si no hay ingredientes en metadata, parsear desde la descripción (fallback)
   return parseIngredientsFromDescription(product.description || '');
 };
@@ -1465,47 +1523,47 @@ const getProductIngredients = (product: Product): string[] => {
 // Mejora: Separa mejor los ingredientes considerando múltiples separadores
 const parseIngredientsFromDescription = (description: string): string[] => {
   if (!description) return [];
-  
+
   let text = description.trim();
-  
+
   // Remover palabras comunes al inicio como "incluye", "contiene", "con", etc.
   text = text.replace(/^(incluye|contiene|con|tiene|viene con|trae)\s*:?\s*/i, '');
-  
+
   // Reemplazar múltiples separadores comunes por un separador único
   // "y", "con", ",", "y con", "más", "además", etc.
   text = text.replace(/\s*(y|con|y con|más|además|incluye|también|o|ó)\s+/gi, '|SEPARADOR|');
-  
+
   // Separar por comas también
   text = text.replace(/,/g, '|SEPARADOR|');
-  
+
   // Separar por el separador personalizado
   const parts = text.split('|SEPARADOR|').map(p => p.trim()).filter(p => p.length > 0);
-  
+
   const ingredients: string[] = [];
-  
+
   parts.forEach(part => {
     // Limpiar cada parte
     let cleaned = part.trim();
-    
+
     // Remover números y cantidades al inicio (ej: "tres tacos" -> "tacos", "2 hamburguesas" -> "hamburguesas")
     cleaned = cleaned.replace(/^\d+\s+/, ''); // "2 hamburguesas" -> "hamburguesas"
     cleaned = cleaned.replace(/^(uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|una|un)\s+/i, ''); // "tres tacos" -> "tacos"
-    
+
     // Remover palabras comunes al inicio
     cleaned = cleaned.replace(/^(con|sin|de|la|el|las|los|del|de la|de los|de las)\s+/i, '');
-    
+
     // Limpiar espacios múltiples
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
-    
+
     // Remover caracteres especiales innecesarios al inicio y final
     cleaned = cleaned.replace(/^[.,;:\-\s]+|[.,;:\-\s]+$/g, '');
-    
+
     // Solo agregar si tiene al menos 2 caracteres y no es solo números
     if (cleaned && cleaned.length >= 2 && !/^\d+$/.test(cleaned)) {
       ingredients.push(cleaned);
     }
   });
-  
+
   // Si aún no tenemos ingredientes, intentar dividir por espacios si la descripción es corta
   if (ingredients.length === 0 && description.length < 100 && !description.includes(',')) {
     const words = description.trim().split(/\s+/).filter(w => w.length > 3);
@@ -1513,7 +1571,7 @@ const parseIngredientsFromDescription = (description: string): string[] => {
       ingredients.push(...words);
     }
   }
-  
+
   // Si todavía no tenemos ingredientes, usar la descripción completa (limpiada)
   if (ingredients.length === 0 && description.length < 100) {
     const cleaned = description.replace(/^(incluye|contiene|con)\s*:?\s*/i, '').trim();
@@ -1521,11 +1579,11 @@ const parseIngredientsFromDescription = (description: string): string[] => {
       ingredients.push(cleaned);
     }
   }
-  
+
   // Eliminar duplicados (case-insensitive)
   const uniqueIngredients: string[] = [];
   const seen = new Set<string>();
-  
+
   ingredients.forEach(ing => {
     const lower = ing.toLowerCase();
     if (!seen.has(lower)) {
@@ -1533,6 +1591,6 @@ const parseIngredientsFromDescription = (description: string): string[] => {
       uniqueIngredients.push(ing);
     }
   });
-  
+
   return uniqueIngredients;
 };

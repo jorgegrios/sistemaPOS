@@ -10,6 +10,7 @@ import { getApiBaseUrl } from '../utils/api-config';
 const API_BASE_URL = getApiBaseUrl().replace('/v1', '') || '/api';
 const TOKEN_KEY = 'pos_token';
 const REFRESH_TOKEN_KEY = 'pos_refresh_token';
+const RESTAURANT_ID_KEY = 'pos_restaurant_id';
 
 export interface ApiResponse<T> {
   data?: T;
@@ -43,11 +44,26 @@ class ApiClient {
   }
 
   /**
-   * Clear token
+   * Get stored Restaurant ID
+   */
+  getRestaurantId(): string | null {
+    return localStorage.getItem(RESTAURANT_ID_KEY);
+  }
+
+  /**
+   * Set Restaurant ID
+   */
+  setRestaurantId(id: string): void {
+    localStorage.setItem(RESTAURANT_ID_KEY, id);
+  }
+
+  /**
+   * Clear token and restaurant ID
    */
   clearToken(): void {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(RESTAURANT_ID_KEY);
   }
 
   /**
@@ -55,7 +71,18 @@ class ApiClient {
    */
   private getAuthHeader(): Record<string, string> {
     const token = this.getToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
+    const headers: Record<string, string> = {};
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const restaurantId = this.getRestaurantId();
+    if (restaurantId) {
+      headers['X-Restaurant-ID'] = restaurantId;
+    }
+
+    return headers;
   }
 
   /**

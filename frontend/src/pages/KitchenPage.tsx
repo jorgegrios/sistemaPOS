@@ -42,7 +42,7 @@ export const KitchenPage: React.FC = () => {
       setPreparingItem(orderItemId);
       await kitchenDomainService.markItemPrepared(orderItemId);
       toast.success('Item marcado como preparado');
-      
+
       // Reload orders
       await loadKitchenOrders();
     } catch (err: any) {
@@ -161,7 +161,7 @@ export const KitchenPage: React.FC = () => {
                   {order.items.map((item) => {
                     const isPreparing = preparingItem === item.id;
                     const isPrepared = item.status === 'prepared';
-                    
+
                     return (
                       <div
                         key={item.id}
@@ -175,6 +175,11 @@ export const KitchenPage: React.FC = () => {
                         <div className="mb-2">
                           <h3 className="text-base font-bold mb-1">
                             {item.productName}
+                            {item.seatNumber && (
+                              <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full font-bold">
+                                Silla {item.seatNumber}
+                              </span>
+                            )}
                           </h3>
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-semibold">
@@ -182,8 +187,8 @@ export const KitchenPage: React.FC = () => {
                             </span>
                             <span className={`
                               px-2 py-1 rounded font-bold text-xs
-                              ${item.status === 'sent' 
-                                ? 'bg-yellow-500 text-white' 
+                              ${item.status === 'sent'
+                                ? 'bg-yellow-500 text-white'
                                 : 'bg-green-500 text-white'
                               }
                             `}>

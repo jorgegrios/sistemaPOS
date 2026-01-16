@@ -3,6 +3,7 @@
  * Creates sample data: restaurant, menu, categories, items, users, tables, suppliers, inventory
  */
 
+import 'dotenv/config';
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';

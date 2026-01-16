@@ -14,11 +14,9 @@ export interface KitchenOrderItem {
   productName: string;
   quantity: number;
   status: OrderItemStatus;
-  notes?: string;
-  tableNumber: string;
-  orderNumber: string;
-  createdAt: string;
   sentAt: string;
+  seatNumber?: number;
+  notes?: string; // Internal notes/modifiers
 }
 
 export interface KitchenOrder {

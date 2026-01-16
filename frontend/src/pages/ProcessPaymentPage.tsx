@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { orderService, Order } from '../services/order-service';
+import { orderService, Order, OrderItem } from '../services/order-service';
 import { paymentService, PaymentProvider } from '../services/payment-service';
 import { toast } from 'sonner';
 import { StripeCardForm } from '../components/StripeCardForm';
@@ -70,6 +70,12 @@ export const ProcessPaymentPage: React.FC = () => {
       return;
     }
 
+    // Validate split selection
+    if (splitMode === 'seat' && selectedSeat === null) {
+      setError('Please select a seat to pay for');
+      return;
+    }
+
     try {
       setProcessing(true);
       setError(null);
@@ -77,10 +83,32 @@ export const ProcessPaymentPage: React.FC = () => {
       // Generate idempotency key
       const idempotencyKey = `${id}-${Date.now()}`;
 
+      // Calculate amount based on split mode
+      let amountToPay = order.total;
+      let itemsToPay: string[] = [];
+
+      if (splitMode === 'seat' && selectedSeat !== null) {
+        const seatItems = order.items?.filter(item => (item.seatNumber || 1) === selectedSeat) || [];
+        if (seatItems.length === 0) {
+          throw new Error(`No items found for Seat ${selectedSeat}`);
+        }
+
+        // Calculate subtotal for seat
+        const seatSubtotal = seatItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+        // Proportional tax and discount
+        const ratio = seatSubtotal / order.subtotal;
+        const seatTax = order.tax * ratio;
+        const seatDiscount = order.discount * ratio;
+
+        amountToPay = seatSubtotal + seatTax - seatDiscount;
+        itemsToPay = seatItems.map(i => i.id);
+      }
+
       // Prepare payment data
       const paymentData = {
         orderId: id,
-        amount: Math.round(order.total * 100), // Convert to cents
+        amount: Math.round(amountToPay * 100), // Convert to cents
         currency: 'USD',
         method: paymentMethod,
         provider: provider,
@@ -90,7 +118,10 @@ export const ProcessPaymentPage: React.FC = () => {
         metadata: {
           orderNumber: order.orderNumber,
           tip: tip,
-          paymentMethod: paymentMethod
+          paymentMethod: paymentMethod,
+          paymentType: splitMode === 'seat' ? 'split_check' : 'full_order',
+          seatNumber: splitMode === 'seat' ? selectedSeat : undefined,
+          paidItems: splitMode === 'seat' ? itemsToPay : undefined
         }
       };
 
@@ -149,7 +180,76 @@ export const ProcessPaymentPage: React.FC = () => {
     return null;
   }
 
-  const totalWithTip = order.total + tip;
+  // Split check state
+  const [splitMode, setSplitMode] = useState<'none' | 'seat'>('none');
+  const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+
+  useEffect(() => {
+    const loadOrder = async () => {
+      if (!id) {
+        setError('Order ID is required');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const orderData = await orderService.getOrder(id);
+        setOrder(orderData);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to load order';
+        setError(errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadOrder();
+  }, [id]);
+
+  // Derived state for split check
+  const availableSeats = order?.items
+    ? Array.from(new Set(order.items.map(item => item.seatNumber || 1))).sort((a, b) => a - b)
+    : [];
+
+  const getFilteredItems = (): OrderItem[] => { // Use OrderItem from local import or define custom
+    if (!order || !order.items) return [];
+    if (splitMode === 'none') return order.items;
+    if (selectedSeat === null) return [];
+    return order.items.filter(item => (item.seatNumber || 1) === selectedSeat);
+  };
+
+  const getSubtotal = () => {
+    const items = getFilteredItems();
+    return items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  }
+
+  const getTax = () => {
+    // Simplified tax calculation (assuming proportional tax)
+    if (!order) return 0;
+    if (splitMode === 'none') return order.tax;
+    const sub = getSubtotal();
+    const ratio = sub / order.subtotal;
+    return order.tax * ratio;
+  }
+
+  const getDiscount = () => {
+    // Simplified discount calculation (assuming proportional discount)
+    if (!order) return 0;
+    if (splitMode === 'none') return order.discount;
+    const sub = getSubtotal();
+    const ratio = sub / order.subtotal;
+    return order.discount * ratio;
+  }
+
+  const getComputedTotal = () => {
+    if (!order) return 0;
+    if (splitMode === 'none') return order.total;
+    return getSubtotal() + getTax() - getDiscount();
+  }
+
+  const activeTotal = getComputedTotal();
+  const totalWithTip = activeTotal + tip;
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
@@ -175,9 +275,83 @@ export const ProcessPaymentPage: React.FC = () => {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Payment Form */}
         <div className="lg:col-span-2 space-y-6">
+
+          {/* Split Check Controls */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Payment Type</h2>
+
+            {/* Split Mode Toggle */}
+            <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
+              <button
+                className={`flex-1 py-2 px-4 rounded-md font-medium text-sm transition-all ${splitMode === 'none' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => {
+                  setSplitMode('none');
+                  setSelectedSeat(null);
+                }}
+              >
+                Full Order
+              </button>
+              <button
+                className={`flex-1 py-2 px-4 rounded-md font-medium text-sm transition-all ${splitMode === 'seat' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setSplitMode('seat')}
+              >
+                Split by Seat
+              </button>
+            </div>
+
+            {/* Seat Selector */}
+            {splitMode === 'seat' && (
+              <div className="mb-2">
+                <p className="text-sm font-medium text-gray-700 mb-2">Select Seat to Pay:</p>
+                <div className="flex flex-wrap gap-2">
+                  {availableSeats.length > 0 ? (
+                    availableSeats.map(seat => (
+                      <button
+                        key={seat}
+                        onClick={() => setSelectedSeat(seat)}
+                        className={`
+                          w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all
+                          ${selectedSeat === seat
+                            ? 'bg-indigo-600 text-white ring-2 ring-indigo-300 ring-offset-1'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}
+                        `}
+                      >
+                        {seat}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">No seat info available</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Items for Selection (Preview) */}
+            {splitMode === 'seat' && selectedSeat !== null && (
+              <div className="mt-4 p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+                <p className="text-xs font-semibold text-indigo-800 mb-2 uppercase tracking-wide">
+                  Items for Seat {selectedSeat}
+                </p>
+                <ul className="space-y-1">
+                  {getFilteredItems().map(item => (
+                    <li key={item.id} className="text-sm text-indigo-900 flex justify-between">
+                      <span>{item.quantity}x {item.name}</span>
+                      <span className="font-semibold">${(item.price * item.quantity).toFixed(2)}</span>
+                    </li>
+                  ))}
+                  {getFilteredItems().length === 0 && (
+                    <li className="text-sm text-indigo-400 italic">No items for this seat</li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </div>
+
           {/* Order Summary */}
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Order Summary</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-4">
+              {splitMode === 'none' ? 'Order Summary' : `Summary (Seat ${selectedSeat || '...'})`}
+            </h2>
             <div className="space-y-2">
               <div className="flex justify-between text-gray-600">
                 <span>Subtotal</span>
@@ -217,11 +391,10 @@ export const ProcessPaymentPage: React.FC = () => {
                 <button
                   key={method.value}
                   onClick={() => setPaymentMethod(method.value as any)}
-                  className={`p-4 sm:p-5 rounded-lg border-2 transition duration-200 active:scale-95 ${
-                    paymentMethod === method.value
-                      ? 'border-blue-600 bg-blue-50 shadow-md'
-                      : 'border-gray-200 hover:border-gray-300 active:bg-gray-50'
-                  }`}
+                  className={`p-4 sm:p-5 rounded-lg border-2 transition duration-200 active:scale-95 ${paymentMethod === method.value
+                    ? 'border-blue-600 bg-blue-50 shadow-md'
+                    : 'border-gray-200 hover:border-gray-300 active:bg-gray-50'
+                    }`}
                 >
                   <div className="text-3xl sm:text-2xl mb-2">{method.icon}</div>
                   <div className="font-semibold text-gray-800 text-sm sm:text-base">{method.label}</div>
@@ -314,11 +487,10 @@ export const ProcessPaymentPage: React.FC = () => {
                 <button
                   key={percentage}
                   onClick={() => handleQuickTip(percentage)}
-                  className={`p-4 sm:p-3 rounded-lg border-2 transition duration-200 active:scale-95 ${
-                    tip > 0 && Math.abs((tip / order.total) * 100 - percentage) < 0.01
-                      ? 'border-blue-600 bg-blue-50 shadow-md'
-                      : 'border-gray-200 hover:border-gray-300 active:bg-gray-50'
-                  }`}
+                  className={`p-4 sm:p-3 rounded-lg border-2 transition duration-200 active:scale-95 ${tip > 0 && Math.abs((tip / order.total) * 100 - percentage) < 0.01
+                    ? 'border-blue-600 bg-blue-50 shadow-md'
+                    : 'border-gray-200 hover:border-gray-300 active:bg-gray-50'
+                    }`}
                 >
                   <div className="font-semibold text-gray-800 text-base sm:text-sm">{percentage}%</div>
                   <div className="text-xs text-gray-500 mt-1">

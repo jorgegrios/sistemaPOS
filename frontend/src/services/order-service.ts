@@ -13,6 +13,7 @@ export interface OrderItem {
   quantity: number;
   description?: string;
   notes?: string;
+  seatNumber?: number; // Added for split checks
 }
 
 export interface Order {
