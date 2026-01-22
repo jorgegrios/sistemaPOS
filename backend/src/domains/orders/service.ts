@@ -11,7 +11,7 @@ import { getActiveOrderForTable, isOrderSentToKitchen, canCloseOrder } from '../
 import { emitEvent, DomainEventType } from '../../shared/events';
 
 export class OrdersService {
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool) { }
 
   /**
    * Create Order (Idempotent)
@@ -21,7 +21,7 @@ export class OrdersService {
   async createOrder(request: CreateOrderRequest): Promise<Order> {
     // IDEMPOTENCY CHECK: Check if active order exists for table
     const existingOrderId = await getActiveOrderForTable(this.pool, request.tableId);
-    
+
     if (existingOrderId) {
       // Return existing order (idempotent)
       return this.getOrder(existingOrderId);
@@ -86,10 +86,10 @@ export class OrdersService {
    * RULE: Freeze price at time of order (price_snapshot)
    */
   async addItemsToOrder(orderId: string, request: AddItemsRequest): Promise<OrderItem[]> {
-    // Verify order exists and is in draft status
+    // Verify order exists and is in a modifiable status (draft or sent_to_kitchen)
     const order = await this.getOrder(orderId);
-    
-    if (order.status !== 'draft') {
+
+    if (order.status !== 'draft' && order.status !== 'sent_to_kitchen') {
       throw new Error(`Cannot add items to order with status: ${order.status}`);
     }
 
@@ -157,7 +157,7 @@ export class OrdersService {
   async removeAllItemsFromOrder(orderId: string): Promise<void> {
     // Verify order exists and is in draft status
     const order = await this.getOrder(orderId);
-    
+
     if (order.status !== 'draft') {
       throw new Error(`Cannot remove items from order with status: ${order.status}`);
     }
@@ -182,44 +182,51 @@ export class OrdersService {
    * RULE: Do not resend if already sent (idempotent)
    */
   async sendToKitchen(orderId: string): Promise<Order> {
-    // IDEMPOTENCY CHECK: Already sent?
-    if (await isOrderSentToKitchen(this.pool, orderId)) {
-      // Return existing order (idempotent)
-      return this.getOrder(orderId);
-    }
-
-    // Verify order exists and is in draft status
+    // Verify order exists and is in a valid status for preparation
     const order = await this.getOrder(orderId);
-    
-    if (order.status !== 'draft') {
+
+    if (order.status !== 'draft' && order.status !== 'sent_to_kitchen' && order.status !== 'served') {
       throw new Error(`Cannot send order to kitchen with status: ${order.status}`);
     }
 
-    // Change order status
-    await this.pool.query(
-      `UPDATE orders SET status = 'sent_to_kitchen' WHERE id = $1`,
+    // Change all 'pending' order items status to 'sent'
+    // This allows additions to be "sent" even if the order was already sent once
+    const updateResult = await this.pool.query(
+      `UPDATE order_items 
+       SET status = 'sent' 
+       WHERE order_id = $1 AND status = 'pending'
+       RETURNING id`,
       [orderId]
     );
 
-    // Change all order items status to 'sent'
-    await this.pool.query(
-      `UPDATE order_items SET status = 'sent' WHERE order_id = $1 AND status = 'pending'`,
-      [orderId]
-    );
+    const updatedItemCount = updateResult.rows.length;
 
-    // Get order items for event
-    const items = await this.getOrderItems(orderId);
+    // If order was in 'draft', change its status to 'sent_to_kitchen'
+    // Also if it was 'served', move it back to 'sent_to_kitchen' because new items are being prepared
+    if (order.status === 'draft' || order.status === 'served') {
+      await this.pool.query(
+        `UPDATE orders SET status = 'sent_to_kitchen' WHERE id = $1`,
+        [orderId]
+      );
+    }
 
-    // Emit event (include tableId for table occupation)
-    emitEvent(DomainEventType.ORDER_SENT_TO_KITCHEN, {
-      orderId,
-      tableId: order.tableId,
-      items: items.map(item => ({
-        id: item.id,
-        productId: item.productId,
-        quantity: item.quantity,
-      })),
-    } as any);
+    // Only emit event if something actually changed (pending items were sent)
+    // or if the order just transitioned from draft
+    if (updatedItemCount > 0 || order.status === 'draft') {
+      // Get order items for event
+      const items = await this.getOrderItems(orderId);
+
+      // Emit event (include tableId for table occupation)
+      emitEvent(DomainEventType.ORDER_SENT_TO_KITCHEN, {
+        orderId,
+        tableId: order.tableId,
+        items: items.map(item => ({
+          id: item.id,
+          productId: item.productId,
+          quantity: item.quantity,
+        })),
+      } as any);
+    }
 
     return this.getOrder(orderId);
   }
@@ -230,14 +237,14 @@ export class OrdersService {
    */
   async markAsServed(orderId: string): Promise<Order> {
     const order = await this.getOrder(orderId);
-    
+
     if (order.status !== 'sent_to_kitchen') {
       throw new Error(`Cannot mark order as served with status: ${order.status}`);
     }
 
     // Verify all items are prepared or served
     const items = await this.getOrderItems(orderId);
-    const allPreparedOrServed = items.every(item => 
+    const allPreparedOrServed = items.every(item =>
       item.status === 'prepared' || item.status === 'served'
     );
 
@@ -274,7 +281,7 @@ export class OrdersService {
    */
   async closeOrder(orderId: string): Promise<Order> {
     const order = await this.getOrder(orderId);
-    
+
     if (order.status === 'closed') {
       // Already closed (idempotent)
       return order;
@@ -308,7 +315,7 @@ export class OrdersService {
    */
   async cancelOrder(orderId: string): Promise<Order> {
     const order = await this.getOrder(orderId);
-    
+
     if (order.status === 'closed') {
       throw new Error('Cannot cancel closed order');
     }
@@ -369,6 +376,51 @@ export class OrdersService {
       `UPDATE orders SET subtotal = $1, tax = $2, total = $3 WHERE id = $4`,
       [subtotal, tax, total, orderId]
     );
+  }
+
+  /**
+   * Cancel or Remove Order Item
+   * RULE: If 'pending', delete the record
+   * RULE: If 'sent', 'prepared', or 'served', change status to 'cancelled'
+   */
+  async cancelOrderItem(orderId: string, itemId: string): Promise<void> {
+    // Check if item exists and get its current status
+    const itemResult = await this.pool.query(
+      `SELECT status FROM order_items WHERE id = $1 AND order_id = $2`,
+      [itemId, orderId]
+    );
+
+    if (itemResult.rows.length === 0) {
+      throw new Error(`Item ${itemId} not found in order ${orderId}`);
+    }
+
+    const { status } = itemResult.rows[0];
+
+    if (status === 'pending') {
+      // Draft item - just delete it
+      await this.pool.query(
+        `DELETE FROM order_items WHERE id = $1`,
+        [itemId]
+      );
+      console.log(`[Order] Item ${itemId} deleted (was pending)`);
+    } else {
+      // Sent/Prepared item - mark as cancelled for accountability
+      await this.pool.query(
+        `UPDATE order_items SET status = 'cancelled' WHERE id = $1`,
+        [itemId]
+      );
+      console.log(`[Order] Item ${itemId} marked as cancelled (was ${status})`);
+    }
+
+    // Recalculate totals
+    await this.recalculateOrderTotals(orderId);
+
+    // Emit event
+    emitEvent(DomainEventType.ORDER_ITEM_CANCELLED, {
+      orderId,
+      itemId,
+      previousStatus: status
+    });
   }
 
   /**

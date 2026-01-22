@@ -25,11 +25,11 @@ import menuCostsRouter from './routes/menu-costs';
 import advancedCostingRouter from './routes/advanced-costing';
 import dynamicPricingRouter from './routes/dynamic-pricing';
 import { swaggerSpec } from './swagger';
-import { 
-  initSentry, 
-  initDataDog, 
-  errorTrackingMiddleware, 
-  requestTrackingMiddleware 
+import {
+  initSentry,
+  initDataDog,
+  errorTrackingMiddleware,
+  requestTrackingMiddleware
 } from './middleware/monitoring';
 import { applyIndexes } from './config/performance';
 import { Pool } from 'pg';
@@ -44,12 +44,14 @@ import productsDomainRouter from './domains/products/routes';
 import kitchenDomainRouter from './domains/kitchen/routes';
 import barDomainRouter from './domains/bar/routes';
 import paymentsDomainRouter from './domains/payments/routes';
+import cashierDomainRouter from './domains/cashier/routes';
 
 // Event listeners for domain communication
 import { onEvent, DomainEventType } from './shared/events';
 import { TablesService } from './domains/tables/service';
 import { OrdersService } from './domains/orders/service';
 import { pool } from './shared/db';
+import { CashierDomainService } from './domains/cashier/service';
 
 const app = express();
 const server = http.createServer(app);
@@ -69,17 +71,17 @@ const corsOptions = {
     if (process.env.NODE_ENV === 'development' || !process.env.CORS_ORIGIN) {
       return callback(null, true);
     }
-    
+
     // En producción, usar CORS_ORIGIN de .env o permitir todas si no está configurado
-    const allowedOrigins = process.env.CORS_ORIGIN 
+    const allowedOrigins = process.env.CORS_ORIGIN
       ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
       : ['*'];
-    
+
     // Si está configurado como '*', permitir todas
     if (allowedOrigins.includes('*') || !origin) {
       return callback(null, true);
     }
-    
+
     // Verificar si el origin está en la lista permitida
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
@@ -128,10 +130,10 @@ app.use('/api/v1/auth', authRouter);
 app.get('/api/v1/payments/stripe/config', async (req, res) => {
   try {
     const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
-    
+
     if (!publishableKey) {
       // Return 200 with enabled: false (not an error, just not configured)
-      return res.status(200).json({ 
+      return res.status(200).json({
         enabled: false,
         publishableKey: null
       });
@@ -156,6 +158,7 @@ app.use('/api/v2/products', verifyToken, productsDomainRouter);
 app.use('/api/v2/kitchen', verifyToken, kitchenDomainRouter);
 app.use('/api/v2/bar', verifyToken, barDomainRouter);
 app.use('/api/v2/payments', verifyToken, paymentsDomainRouter);
+app.use('/api/v2/cashier', verifyToken, cashierDomainRouter);
 
 // ============================================
 // LEGACY ROUTES (Maintained for compatibility)
@@ -221,6 +224,7 @@ kitchenPrintService.setSocketIO(io);
 // Initialize domain services for event handling
 const tablesService = new TablesService(pool);
 const ordersService = new OrdersService(pool);
+const cashierDomainService = new CashierDomainService(pool);
 
 // Listen for order created - DON'T occupy table yet (only when sent to kitchen)
 // Table should only be occupied when order is sent to kitchen, not when draft is created
@@ -250,13 +254,13 @@ onEvent(DomainEventType.ORDER_CLOSED, async (payload: any) => {
 onEvent(DomainEventType.ORDER_SENT_TO_KITCHEN, async (payload: any) => {
   try {
     const { orderId, tableId, items } = payload;
-    
+
     // Occupy table when order is sent to kitchen (not when draft is created)
     if (tableId) {
       await tablesService.occupyTable(tableId);
       console.log(`[Event] Table ${tableId} occupied - order sent to kitchen`);
     }
-    
+
     // Emit socket event to kitchen room
     io.to('kitchen').emit('order_sent_to_kitchen', { orderId, items });
     console.log(`[Event] Order ${orderId} sent to kitchen`);
@@ -309,6 +313,14 @@ onEvent(DomainEventType.PAYMENT_COMPLETED, async (payload: any) => {
     try {
       await ordersService.closeOrder(orderId);
       console.log(`[Event] Order ${orderId} closed after payment completion`);
+
+      // Update cash session expected balance if it was a cash payment
+      const { method, amount, restaurantId } = payload;
+      const currentSession = await cashierDomainService.getCurrentSession(restaurantId);
+      if (currentSession && method === 'cash') {
+        await cashierDomainService.recordPayment(currentSession.id, method, amount);
+        console.log(`[Event] Cash session ${currentSession.id} balance updated (+${amount})`);
+      }
     } catch (error: any) {
       // Order cannot be closed yet (items not served, etc.)
       console.log(`[Event] Order ${orderId} cannot be closed yet:`, error.message);
@@ -367,9 +379,12 @@ if (process.env.APPLY_INDEXES === 'true') {
 function getLocalIP(): string {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
+    const networkInterface = interfaces[name];
+    if (networkInterface) {
+      for (const iface of networkInterface) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          return iface.address;
+        }
       }
     }
   }
@@ -378,15 +393,18 @@ function getLocalIP(): string {
 
 const LOCAL_IP = getLocalIP();
 
-server.listen(PORT, '0.0.0.0', () => {
+const PORT_VAL = process.env.PORT || 3000;
+const FINAL_PORT = typeof PORT_VAL === 'string' ? parseInt(PORT_VAL, 10) : PORT_VAL;
+
+server.listen(FINAL_PORT, '0.0.0.0', () => {
   console.log(`✅ Backend listening on:`);
-  console.log(`   - Local: http://localhost:${PORT}`);
-  console.log(`   - Red local: http://${LOCAL_IP}:${PORT}`);
-  console.log(`📚 Swagger UI: http://${LOCAL_IP}:${PORT}/api/docs`);
-  console.log(`🏥 Health check: http://${LOCAL_IP}:${PORT}/health`);
-  console.log(`🔐 Auth: POST http://${LOCAL_IP}:${PORT}/api/v1/auth/login`);
+  console.log(`   - Local: http://localhost:${FINAL_PORT}`);
+  console.log(`   - Red local: http://${LOCAL_IP}:${FINAL_PORT}`);
+  console.log(`📚 Swagger UI: http://${LOCAL_IP}:${FINAL_PORT}/api/docs`);
+  console.log(`🏥 Health check: http://${LOCAL_IP}:${FINAL_PORT}/health`);
+  console.log(`🔐 Auth: POST http://${LOCAL_IP}:${FINAL_PORT}/api/v1/auth/login`);
   console.log(`🌐 CORS: ${process.env.NODE_ENV === 'development' || !process.env.CORS_ORIGIN ? 'Permite todas las conexiones (desarrollo)' : `Orígenes permitidos: ${process.env.CORS_ORIGIN}`}`);
-  
+
   if (process.env.SENTRY_DSN) {
     console.log(`📊 Sentry monitoring: Enabled`);
   }

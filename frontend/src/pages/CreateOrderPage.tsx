@@ -23,6 +23,7 @@ import {
 import { menuService } from '../services/menu-service';
 import { toast } from 'sonner';
 import { ProductCustomizationModal } from '../components/ProductCustomizationModal';
+import { useTranslation } from 'react-i18next';
 
 interface ProductCustomization {
   excludedIngredients: string[]; // Ingredientes excluidos
@@ -52,6 +53,7 @@ interface MenuCategory {
 export const CreateOrderPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { t } = useTranslation();
 
   // Estado simple
   const [tables, setTables] = useState<TableWithOrder[]>([]);
@@ -86,7 +88,6 @@ export const CreateOrderPage: React.FC = () => {
   const [customizationModalOpen, setCustomizationModalOpen] = useState(false);
   const [productToCustomize, setProductToCustomize] = useState<Product | null>(null);
   const [availableModifiers, setAvailableModifiers] = useState<Array<{ id: string; name: string; priceDelta: number; active: boolean; createdAt: string }>>([]);
-
   // Cargar datos iniciales
   useEffect(() => {
     loadInitialData();
@@ -281,32 +282,37 @@ export const CreateOrderPage: React.FC = () => {
 
       setCurrentOrder(order);
 
-      // Si la orden está en draft, cargar items al cart
-      if (order.status === 'draft' && order.items.length > 0) {
+      // Si hay items en la orden, cargarlos solo si es necesario (verificación de estado)
+      if (order.items.length > 0) {
         const allProducts = await productsDomainService.getActiveProducts();
         const productMap = new Map(allProducts.map(p => [p.id, p]));
 
-        const cartItems: CartItem[] = order.items.map(item => {
-          const product = productMap.get(item.productId) || {
-            id: item.productId,
-            name: item.productName || `Producto ${item.productId.substring(0, 8)}`,
-            categoryId: '',
-            basePrice: item.priceSnapshot,
-            active: true
-          } as Product;
+        // No sobrescribir el carrito si ya tenemos items pendientes localmente
+        // y la orden ya está en cocina/servida. Esto permite adiciones.
+        if (order.status === 'draft') {
+          const cartItems: CartItem[] = order.items.map(item => {
+            const product = productMap.get(item.productId) || {
+              id: item.productId,
+              name: item.productName || `Producto ${item.productId.substring(0, 8)}`,
+              categoryId: '',
+              basePrice: item.priceSnapshot,
+              active: true
+            } as Product;
 
-          return {
-            product,
-            quantity: item.quantity,
-            notes: item.notes || undefined,
-            seatNumber: item.seatNumber || 1
-          };
-        });
+            return {
+              product,
+              quantity: item.quantity,
+              notes: item.notes || undefined,
+              seatNumber: item.seatNumber || 1
+            };
+          });
 
-        setCart(cartItems);
-      } else {
-        // Si la orden está en otro estado (sent_to_kitchen, etc.), no cargar items al cart
-        setCart([]);
+          setCart(cartItems);
+        } else {
+          // Si la orden ya está en cocina, el cart local representa NUEVAS adiciones
+          // No limpiamos el cart, permitimos que el usuario siga agregando
+          console.log('[CreateOrderPage] Orden en cocina - manteniendo cart local para adiciones');
+        }
       }
     } catch (err: any) {
       console.error('Error loading order:', err);
@@ -439,7 +445,7 @@ export const CreateOrderPage: React.FC = () => {
     }
 
     // Obtener ingredientes (prioriza metadata, luego parsea descripción)
-    const includedIngredients = getProductIngredients(product);
+    getProductIngredients(product);
 
     // Agregar producto directamente al carrito con ingredientes incluidos por defecto
     const newCartItem: CartItem = {
@@ -525,6 +531,31 @@ export const CreateOrderPage: React.FC = () => {
     }
   };
 
+  const handleCancelItem = async (itemId: string, productName: string, isDraft: boolean) => {
+    if (!currentOrder) return;
+
+    if (!isDraft) {
+      // Pedir confirmación para items ya enviados
+      if (!window.confirm(`¿Seguro que quieres cancelar "${productName}"? Se notificará a la cocina.`)) {
+        return;
+      }
+    }
+
+    try {
+      setLoading(true);
+      await ordersDomainService.cancelOrderItem(currentOrder.id, itemId);
+      toast.success(isDraft ? 'Producto eliminado' : 'Producto cancelado');
+
+      // Recargar orden para actualizar totales y lista
+      await loadOrderForTable(currentOrder.id);
+    } catch (err: any) {
+      console.error('Error cancelling item:', err);
+      toast.error(err.message || 'Error al cancelar producto');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSendToKitchen = async () => {
     if (!currentOrder) {
       toast.error('No hay orden activa');
@@ -539,11 +570,14 @@ export const CreateOrderPage: React.FC = () => {
     try {
       setSendingToKitchen(true);
 
-      // Eliminar todos los items actuales de la orden (si existen)
-      try {
-        await ordersDomainService.removeAllItemsFromOrder(currentOrder.id);
-      } catch (err) {
-        // Ignorar si no hay items para eliminar
+      // NO eliminar items previos si la orden ya está en cocina
+      // El backend ahora permite añadir items a órdenes 'sent_to_kitchen'
+      if (currentOrder.status === 'draft') {
+        try {
+          await ordersDomainService.removeAllItemsFromOrder(currentOrder.id);
+        } catch (err) {
+          // Ignorar si no hay items para eliminar
+        }
       }
 
       // Agregar items del cart a la orden con customizaciones
@@ -644,11 +678,17 @@ export const CreateOrderPage: React.FC = () => {
   const [showMobileCart, setShowMobileCart] = useState(false);
 
   // Calcular subtotal incluyendo adiciones
-  const subtotal = cart.reduce((sum, item) => {
+  // Calcular subtotal de adiciones/carrito
+  const cartSubtotal = cart.reduce((sum, item) => {
     const basePrice = item.product.basePrice * item.quantity;
     const additionsPrice = (item.customization?.additions.reduce((addSum, add) => addSum + add.priceDelta, 0) || 0) * item.quantity;
     return sum + basePrice + additionsPrice;
   }, 0);
+
+  // Totales finales (Orden Confirmada + Adiciones)
+  // Si la orden es draft, el cart contiene todo. Si es sent, el cart solo contiene adiciones.
+  const confirmedSubtotal = (currentOrder && currentOrder.status !== 'draft') ? (currentOrder.subtotal || 0) : 0;
+  const subtotal = confirmedSubtotal + cartSubtotal;
   const tax = subtotal * 0.1;
   const total = subtotal + tax;
 
@@ -664,16 +704,16 @@ export const CreateOrderPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 relative">
+    <div className="h-full flex flex-col bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 overflow-hidden">
       {/* Offline Banner */}
       {isOffline && (
-        <div className="bg-red-500 text-white px-4 py-2 text-center text-sm font-bold animate-pulse">
+        <div className="bg-red-500 text-white px-4 py-2 text-center text-sm font-bold animate-pulse flex-shrink-0">
           ⚠️ Modo Offline - Conexión Perdida. Los pedidos se guardarán localmente.
         </div>
       )}
 
       {/* Header */}
-      <div className="bg-white shadow-md px-4 py-3 flex items-center justify-between">
+      <div className="bg-white shadow-md px-4 py-3 flex items-center justify-between flex-shrink-0">
         <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
           🍽️ Toma de Pedidos
         </h1>
@@ -690,7 +730,7 @@ export const CreateOrderPage: React.FC = () => {
               className="px-3 py-2 bg-gray-200 hover:bg-gray-300 active:bg-gray-400 rounded-lg font-semibold text-sm transition active:scale-95 min-h-[44px] flex items-center gap-2"
             >
               <span>←</span>
-              <span className="hidden sm:inline">Volver a Mesas</span>
+              <span className="hidden sm:inline">{t('orders.back_to_tables', 'Volver a Mesas')}</span>
             </button>
           )}
           {/* Botón de carrito en móvil */}
@@ -709,23 +749,25 @@ export const CreateOrderPage: React.FC = () => {
             onClick={() => navigate('/orders')}
             className="px-4 py-2 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 rounded-lg font-semibold text-sm transition active:scale-95 min-h-[44px]"
           >
-            Ver Órdenes
+            {t('nav.orders')}
           </button>
+
         </div>
       </div>
 
       {/* Vista de Selección de Mesas */}
       {showTableSelection ? (
-        <div className="h-[calc(100vh-73px)] overflow-y-auto p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-6 sm:mb-8">
               <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-800 mb-2">
-                Selecciona una Mesa
+                {t('orders.table_select', 'Selecciona una Mesa')}
               </h2>
               <p className="text-gray-600 text-sm sm:text-base">
-                Elige la mesa para comenzar a tomar el pedido
+                {t('orders.table_select_hint', 'Elige la mesa para comenzar a tomar el pedido')}
               </p>
             </div>
+
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
               {tables.map(table => {
@@ -766,7 +808,7 @@ export const CreateOrderPage: React.FC = () => {
         </div>
       ) : (
         /* Vista de Pedidos - 3 Columnas Iguales */
-        <div className="flex flex-col md:flex-row h-[calc(100vh-73px)] overflow-hidden">
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* Columna 1: Categorías */}
           <div className="w-full md:w-1/3 bg-white border-r border-gray-200 flex flex-col overflow-hidden flex-shrink-0">
             <div className="p-2 sm:p-3 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-gray-200 flex-shrink-0">
@@ -1166,7 +1208,7 @@ export const CreateOrderPage: React.FC = () => {
                 <div className="mt-6 pt-6 border-t-2 border-gray-300">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-bold text-gray-800">
-                      {currentOrder.status === 'served' ? '✅ Pedidos Entregados' : 'En Preparación:'}
+                      {currentOrder.status === 'served' ? '✅ Pedidos Entregados' : t('orders.in_preparation')}
                     </h3>
                     {currentOrder.status === 'served' && (
                       <span className="px-3 py-1 rounded-full bg-green-500 text-white text-xs font-bold">
@@ -1259,9 +1301,20 @@ export const CreateOrderPage: React.FC = () => {
                                 </p>
                               )}
                             </div>
-                            <span className={`px-2 py-1.5 rounded-lg text-xs font-bold min-w-[90px] text-center flex-shrink-0 ${getBadgeStyles()}`}>
-                              {getStatusText()}
-                            </span>
+                            <div className="flex flex-col items-end gap-2">
+                              {currentOrder && currentOrder.status !== 'closed' && (
+                                <button
+                                  onClick={() => handleCancelItem(item.id, item.productName || 'Producto', false)}
+                                  className="w-7 h-7 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-bold active:scale-95 shadow-sm hover:bg-red-200 transition-colors"
+                                  title="Cancelar plato"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                              <span className={`px-2 py-1.5 rounded-lg text-xs font-bold min-w-[90px] text-center flex-shrink-0 ${getBadgeStyles()}`}>
+                                {getStatusText()}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       );
@@ -1279,7 +1332,7 @@ export const CreateOrderPage: React.FC = () => {
             </div>
 
             {/* Resumen y Botones - Fijo en la parte inferior */}
-            {cart.length > 0 && (
+            {(cart.length > 0 || currentOrder) && (
               <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
                 <div className="space-y-2 mb-4">
                   <div className="flex justify-between text-sm">
@@ -1296,26 +1349,26 @@ export const CreateOrderPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Solo mostrar botón si la orden está en draft o si no hay orden aún */}
-                {(!currentOrder || currentOrder.status === 'draft') && (
+                {/* Mostrar botón si hay items en el carrito (nuevos o draft) */}
+                {cart.length > 0 && (
                   <button
                     onClick={handleSendToKitchen}
-                    disabled={sendingToKitchen || (!currentOrder && cart.length === 0)}
+                    disabled={sendingToKitchen}
                     className={`
                     w-full py-4 rounded-xl font-bold text-lg transition-all duration-200
                     min-h-[52px] active:scale-95
-                    ${sendingToKitchen || (!currentOrder && cart.length === 0)
+                    ${sendingToKitchen
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg hover:shadow-xl'
                       }
                   `}
                   >
-                    {sendingToKitchen ? 'Enviando...' : 'Enviar a Cocina y/o Bar 🍳🍹'}
+                    {sendingToKitchen ? 'Enviando...' : (currentOrder && currentOrder.status !== 'draft') ? 'Enviar Adiciones a Cocina 🍳' : 'Enviar a Cocina y/o Bar 🍳🍹'}
                   </button>
                 )}
 
-                {/* Mostrar mensaje si la orden ya fue enviada */}
-                {currentOrder && currentOrder.status !== 'draft' && (
+                {/* Mostrar mensaje si la orden ya fue enviada y el carrito está vacío */}
+                {currentOrder && currentOrder.status !== 'draft' && cart.length === 0 && (
                   <div className="p-3 bg-blue-50 border-2 border-blue-300 rounded-lg text-center">
                     <p className="text-blue-800 font-semibold text-sm">
                       {currentOrder.status === 'sent_to_kitchen' ? '⏳ Orden enviada a cocina' :

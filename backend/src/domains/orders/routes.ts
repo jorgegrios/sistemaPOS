@@ -88,6 +88,21 @@ router.delete('/:id/items', verifyToken, async (req: AuthRequest, res: Response)
 });
 
 /**
+ * DELETE /api/v2/orders/:id/items/:itemId
+ * Cancel or Remove a single item from order
+ */
+router.delete('/:id/items/:itemId', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id, itemId } = req.params;
+    await ordersService.cancelOrderItem(id, itemId);
+    return res.status(200).json({ message: 'Item cancelled successfully' });
+  } catch (error: any) {
+    console.error('[Orders] Error cancelling item:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/v1/orders/:id/send-to-kitchen
  * Send order to kitchen (idempotent: does nothing if already sent)
  */

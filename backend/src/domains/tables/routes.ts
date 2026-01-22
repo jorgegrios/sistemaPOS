@@ -37,6 +37,7 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
  * Get all tables for restaurant
  */
 router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
+  console.log('[DEBUG] GET /api/v2/tables hit');
   try {
     const restaurantId = req.user?.restaurantId;
     const withOrders = req.query.withOrders === 'true';

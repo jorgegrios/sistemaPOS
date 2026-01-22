@@ -30,27 +30,27 @@ router.get('/active-tables', verifyToken, async (req: AuthRequest, res: Response
       [restaurantId]
     );
 
-      // Get pending orders for tables
-      // First check if check_requested_at column exists
-      let hasCheckRequestedColumn = false;
-      try {
-        const columnCheck = await pool.query(
-          `SELECT column_name 
+    // Get pending orders for tables
+    // First check if check_requested_at column exists
+    let hasCheckRequestedColumn = false;
+    try {
+      const columnCheck = await pool.query(
+        `SELECT column_name 
            FROM information_schema.columns 
            WHERE table_name = 'orders' 
            AND column_name = 'check_requested_at' 
            AND table_schema = 'public'`
-        );
-        hasCheckRequestedColumn = columnCheck.rows.length > 0;
-      } catch (err) {
-        console.error('Error checking for check_requested_at column:', err);
-      }
+      );
+      hasCheckRequestedColumn = columnCheck.rows.length > 0;
+    } catch (err) {
+      console.error('Error checking for check_requested_at column:', err);
+    }
 
-      let pendingOrdersResult;
-      if (hasCheckRequestedColumn) {
-        // Query with check_requested_at column and order status
-        pendingOrdersResult = await pool.query(
-          `SELECT 
+    let pendingOrdersResult;
+    if (hasCheckRequestedColumn) {
+      // Query with check_requested_at column and order status
+      pendingOrdersResult = await pool.query(
+        `SELECT 
             t.id as table_id,
             o.id as order_id,
             o.order_number,
@@ -78,12 +78,12 @@ router.get('/active-tables', verifyToken, async (req: AuthRequest, res: Response
              CASE WHEN o.check_requested_at IS NOT NULL THEN 0 ELSE 1 END,
              CASE WHEN o.status = 'served' THEN 0 ELSE 1 END,
              o.created_at DESC`,
-          [restaurantId]
-        );
-      } else {
-        // Query without check_requested_at column (fallback for databases without migration)
-        pendingOrdersResult = await pool.query(
-          `SELECT 
+        [restaurantId]
+      );
+    } else {
+      // Query without check_requested_at column (fallback for databases without migration)
+      pendingOrdersResult = await pool.query(
+        `SELECT 
             t.id as table_id,
             o.id as order_id,
             o.order_number,
@@ -108,9 +108,9 @@ router.get('/active-tables', verifyToken, async (req: AuthRequest, res: Response
            ORDER BY 
              CASE WHEN o.status = 'served' THEN 0 ELSE 1 END,
              o.created_at DESC`,
-          [restaurantId]
-        );
-      }
+        [restaurantId]
+      );
+    }
 
     // Create a map of table_id -> orders
     const ordersByTable = new Map();
@@ -118,7 +118,7 @@ router.get('/active-tables', verifyToken, async (req: AuthRequest, res: Response
     pendingOrdersResult.rows.forEach((row: any) => {
       // Log each order for debugging
       console.log(`[Cashier] Order ${row.order_id} for table ${row.table_id}: payment_status=${row.payment_status}, order_status=${row.order_status}, total=${row.total}`);
-      
+
       if (!ordersByTable.has(row.table_id)) {
         ordersByTable.set(row.table_id, []);
       }
@@ -140,19 +140,19 @@ router.get('/active-tables', verifyToken, async (req: AuthRequest, res: Response
 
     // Build response with all tables, marking active/inactive
     const tables = allTablesResult.rows.map((table: any) => {
-      const orders = ordersByTable.get(table.id) || [];
+      const orders = (ordersByTable.get(table.id) || []) as any[];
       // Double-check: filter out any orders that shouldn't be here
-      const validOrders = orders.filter(order => {
-        const isValid = order.paymentStatus === 'pending' && 
-                       order.orderStatus !== 'closed' && 
-                       order.orderStatus !== 'cancelled' &&
-                       order.total > 0; // Excluir órdenes vacías (total = 0)
+      const validOrders: any[] = orders.filter(order => {
+        const isValid = order.paymentStatus === 'pending' &&
+          order.orderStatus !== 'closed' &&
+          order.orderStatus !== 'cancelled' &&
+          order.total > 0; // Excluir órdenes vacías (total = 0)
         if (!isValid && orders.length > 0) {
           console.log(`[Cashier] Filtering out invalid order ${order.id} for table ${table.table_number}: paymentStatus=${order.paymentStatus}, orderStatus=${order.orderStatus}, total=${order.total}`);
         }
         return isValid;
       });
-      
+
       const result = {
         id: table.id,
         tableNumber: table.table_number,
@@ -161,14 +161,14 @@ router.get('/active-tables', verifyToken, async (req: AuthRequest, res: Response
         isActive: validOrders.length > 0, // Active if has pending orders
         orders: validOrders // Use filtered orders
       };
-      
+
       if (validOrders.length > 0) {
         console.log(`[Cashier] Table ${table.table_number}: ${validOrders.length} valid orders, isActive: ${result.isActive}`);
         validOrders.forEach(order => {
           console.log(`  - Order ${order.id}: ${order.orderNumber}, total: $${order.total}, paymentStatus: ${order.paymentStatus}, orderStatus: ${order.orderStatus}`);
         });
       }
-      
+
       return result;
     });
 
@@ -233,11 +233,11 @@ router.get('/cash-register-summary', verifyToken, async (req: AuthRequest, res: 
     paymentsResult.rows.forEach((row: any) => {
       const amount = parseFloat(row.amount);
       const method = row.payment_method || 'unknown';
-      
+
       if (!totalsByMethod[method]) {
         totalsByMethod[method] = { count: 0, total: 0 };
       }
-      
+
       totalsByMethod[method].count++;
       totalsByMethod[method].total += amount;
       totalAmount += amount;
@@ -365,7 +365,7 @@ router.get('/paid-orders', verifyToken, async (req: AuthRequest, res: Response) 
         [restaurantId]
       );
       console.log(`[Cashier] Total paid orders for restaurant (no date filter): ${debugResult.rows[0].total}`);
-      
+
       // Also check with date filter to see what's happening
       if (date) {
         const debugWithDate = await pool.query(
@@ -418,7 +418,7 @@ router.get('/paid-orders', verifyToken, async (req: AuthRequest, res: Response) 
         );
 
         // Get cancelled items (items with status 'cancelled' or in cancelled orders)
-        const cancelledItems = itemsResult.rows.filter((item: any) => 
+        const cancelledItems = itemsResult.rows.filter((item: any) =>
           item.item_status === 'cancelled' || item.notes?.toLowerCase().includes('cancelado')
         );
 
@@ -459,7 +459,7 @@ router.get('/paid-orders', verifyToken, async (req: AuthRequest, res: Response) 
             price: parseFloat(item.price),
             notes: item.notes
           })),
-          cancelledItemsTotal: cancelledItems.reduce((sum: number, item: any) => 
+          cancelledItemsTotal: cancelledItems.reduce((sum: number, item: any) =>
             sum + (parseFloat(item.price) * item.quantity), 0
           )
         };
@@ -477,7 +477,7 @@ router.get('/paid-orders', verifyToken, async (req: AuthRequest, res: Response) 
       countDateFilter = `AND o.paid_at >= $${countParams.length + 1} AND o.paid_at < $${countParams.length + 2}`;
       countParams.push(startDate, endDate);
     }
-    
+
     const countResult = await pool.query(
       `SELECT COUNT(*) as total
        FROM orders o

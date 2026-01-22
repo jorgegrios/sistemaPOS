@@ -43,6 +43,7 @@ const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const http_1 = __importDefault(require("http"));
+const os_1 = __importDefault(require("os"));
 const socket_io_1 = require("socket.io");
 const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const payments_1 = __importDefault(require("./routes/payments"));
@@ -74,11 +75,13 @@ const routes_3 = __importDefault(require("./domains/products/routes"));
 const routes_4 = __importDefault(require("./domains/kitchen/routes"));
 const routes_5 = __importDefault(require("./domains/bar/routes"));
 const routes_6 = __importDefault(require("./domains/payments/routes"));
+const routes_7 = __importDefault(require("./domains/cashier/routes"));
 // Event listeners for domain communication
 const events_1 = require("./shared/events");
 const service_1 = require("./domains/tables/service");
 const service_2 = require("./domains/orders/service");
 const db_1 = require("./shared/db");
+const service_3 = require("./domains/cashier/service");
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
 const io = new socket_io_1.Server(server, { cors: { origin: '*' } });
@@ -87,7 +90,35 @@ const io = new socket_io_1.Server(server, { cors: { origin: '*' } });
 (0, monitoring_1.initDataDog)();
 // Middleware
 app.use((0, helmet_1.default)());
-app.use((0, cors_1.default)());
+// Configuración de CORS para aceptar conexiones de red
+const corsOptions = {
+    origin: function (origin, callback) {
+        // En desarrollo, permitir todas las conexiones (localhost y red local)
+        if (process.env.NODE_ENV === 'development' || !process.env.CORS_ORIGIN) {
+            return callback(null, true);
+        }
+        // En producción, usar CORS_ORIGIN de .env o permitir todas si no está configurado
+        const allowedOrigins = process.env.CORS_ORIGIN
+            ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+            : ['*'];
+        // Si está configurado como '*', permitir todas
+        if (allowedOrigins.includes('*') || !origin) {
+            return callback(null, true);
+        }
+        // Verificar si el origin está en la lista permitida
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        }
+        else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true, // Permitir cookies y headers de autenticación
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page']
+};
+app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
 // Request tracking middleware (for performance monitoring)
@@ -142,6 +173,7 @@ app.use('/api/v2/products', auth_1.verifyToken, routes_3.default);
 app.use('/api/v2/kitchen', auth_1.verifyToken, routes_4.default);
 app.use('/api/v2/bar', auth_1.verifyToken, routes_5.default);
 app.use('/api/v2/payments', auth_1.verifyToken, routes_6.default);
+app.use('/api/v2/cashier', auth_1.verifyToken, routes_7.default);
 // ============================================
 // LEGACY ROUTES (Maintained for compatibility)
 // ============================================
@@ -203,6 +235,7 @@ kitchenPrintService_1.default.setSocketIO(io);
 // Initialize domain services for event handling
 const tablesService = new service_1.TablesService(db_1.pool);
 const ordersService = new service_2.OrdersService(db_1.pool);
+const cashierDomainService = new service_3.CashierDomainService(db_1.pool);
 // Listen for order created - DON'T occupy table yet (only when sent to kitchen)
 // Table should only be occupied when order is sent to kitchen, not when draft is created
 (0, events_1.onEvent)(events_1.DomainEventType.ORDER_CREATED, async (payload) => {
@@ -288,6 +321,13 @@ const ordersService = new service_2.OrdersService(db_1.pool);
         try {
             await ordersService.closeOrder(orderId);
             console.log(`[Event] Order ${orderId} closed after payment completion`);
+            // Update cash session expected balance if it was a cash payment
+            const { method, amount, restaurantId } = payload;
+            const currentSession = await cashierDomainService.getCurrentSession(restaurantId);
+            if (currentSession && method === 'cash') {
+                await cashierDomainService.recordPayment(currentSession.id, method, amount);
+                console.log(`[Event] Cash session ${currentSession.id} balance updated (+${amount})`);
+            }
         }
         catch (error) {
             // Order cannot be closed yet (items not served, etc.)
@@ -334,11 +374,32 @@ if (process.env.APPLY_INDEXES === 'true') {
         console.error('[Startup] Failed to apply indexes:', err);
     });
 }
-server.listen(PORT, () => {
-    console.log(`✅ Backend listening on http://localhost:${PORT}`);
-    console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
-    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-    console.log(`🔐 Auth: POST http://localhost:${PORT}/api/v1/auth/login`);
+// Función para obtener la IP local
+function getLocalIP() {
+    const interfaces = os_1.default.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        const networkInterface = interfaces[name];
+        if (networkInterface) {
+            for (const iface of networkInterface) {
+                if (iface.family === 'IPv4' && !iface.internal) {
+                    return iface.address;
+                }
+            }
+        }
+    }
+    return 'localhost';
+}
+const LOCAL_IP = getLocalIP();
+const PORT_VAL = process.env.PORT || 3000;
+const FINAL_PORT = typeof PORT_VAL === 'string' ? parseInt(PORT_VAL, 10) : PORT_VAL;
+server.listen(FINAL_PORT, '0.0.0.0', () => {
+    console.log(`✅ Backend listening on:`);
+    console.log(`   - Local: http://localhost:${FINAL_PORT}`);
+    console.log(`   - Red local: http://${LOCAL_IP}:${FINAL_PORT}`);
+    console.log(`📚 Swagger UI: http://${LOCAL_IP}:${FINAL_PORT}/api/docs`);
+    console.log(`🏥 Health check: http://${LOCAL_IP}:${FINAL_PORT}/health`);
+    console.log(`🔐 Auth: POST http://${LOCAL_IP}:${FINAL_PORT}/api/v1/auth/login`);
+    console.log(`🌐 CORS: ${process.env.NODE_ENV === 'development' || !process.env.CORS_ORIGIN ? 'Permite todas las conexiones (desarrollo)' : `Orígenes permitidos: ${process.env.CORS_ORIGIN}`}`);
     if (process.env.SENTRY_DSN) {
         console.log(`📊 Sentry monitoring: Enabled`);
     }

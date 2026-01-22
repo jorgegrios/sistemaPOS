@@ -14,6 +14,8 @@ import { menuService, MenuItem } from '../services/menu-service';
 import { toast } from 'sonner';
 import { CashRegisterSummaryModal } from '../components/CashRegisterSummaryModal';
 import { PaidOrdersModal } from '../components/PaidOrdersModal';
+import { CashSession } from '../services/cashier-service';
+import { Modal } from '../components/Modal';
 
 type TableStatus = 'available' | 'active' | 'ready_to_pay' | 'paid';
 
@@ -26,13 +28,13 @@ interface OrderItem {
 
 export const CashierPage: React.FC = () => {
   const { user } = useAuth();
-  
+
   // Tables state
   const [activeTables, setActiveTables] = useState<ActiveTable[]>([]);
   const [selectedTable, setSelectedTable] = useState<ActiveTable | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
   const [loading, setLoading] = useState(true);
-  
+
   // Payment state
   const [subtotal, setSubtotal] = useState(0);
   const [tax, setTax] = useState(0);
@@ -41,26 +43,29 @@ export const CashierPage: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [processing, setProcessing] = useState(false);
-  
+
   // Order items state
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
-  
+
   // UI state
   const [showNumpad, setShowNumpad] = useState(false);
   const [numpadValue, setNumpadValue] = useState('');
   const [numpadContext, setNumpadContext] = useState<'tip' | 'amount' | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [viewMode, setViewMode] = useState<'tables' | 'payment'>('tables');
-  
+
   // General payment (no table) state
   const [cart, setCart] = useState<Array<{ item: MenuItem; quantity: number }>>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [showProductSelector, setShowProductSelector] = useState(false);
   const [productSearch, setProductSearch] = useState('');
-  
+
   // Modals state
   const [showCashRegisterSummary, setShowCashRegisterSummary] = useState(false);
   const [showPaidOrders, setShowPaidOrders] = useState(false);
+  const [currentSession, setCurrentSession] = useState<CashSession | null>(null);
+  const [showOpenSessionModal, setShowOpenSessionModal] = useState(false);
+  const [openingBalanceInput, setOpeningBalanceInput] = useState('');
 
   // Update date and time
   useEffect(() => {
@@ -72,10 +77,41 @@ export const CashierPage: React.FC = () => {
 
   // Load active tables
   useEffect(() => {
+    checkSession();
     loadActiveTables();
     const interval = setInterval(loadActiveTables, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  const checkSession = async () => {
+    try {
+      const session = await cashierService.getCurrentSession();
+      setCurrentSession(session);
+      if (!session) {
+        setShowOpenSessionModal(true);
+      }
+    } catch (err) {
+      console.error('Error checking cash session:', err);
+    }
+  };
+
+  const handleOpenSession = async () => {
+    if (!openingBalanceInput || isNaN(parseFloat(openingBalanceInput))) {
+      toast.error('Ingrese un monto inicial válido');
+      return;
+    }
+    try {
+      setProcessing(true);
+      const session = await cashierService.openSession(parseFloat(openingBalanceInput));
+      setCurrentSession(session);
+      setShowOpenSessionModal(false);
+      toast.success('Caja abierta exitosamente');
+    } catch (err: any) {
+      toast.error(err.message || 'Error al abrir caja');
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   // Load menu for general payments
   useEffect(() => {
@@ -124,19 +160,19 @@ export const CashierPage: React.FC = () => {
       // Filtrar mesas: solo incluir órdenes con payment_status = 'pending' y status válido
       // Esto asegura que mesas liberadas no muestren órdenes
       const filteredTables = tables.map(table => {
-        const validOrders = table.orders.filter(order => 
-          order.paymentStatus === 'pending' && 
-          order.orderStatus !== 'closed' && 
+        const validOrders = table.orders.filter(order =>
+          order.paymentStatus === 'pending' &&
+          order.orderStatus !== 'closed' &&
           order.orderStatus !== 'cancelled'
         );
-        
+
         return {
           ...table,
           orders: validOrders,
           isActive: validOrders.length > 0 // Actualizar isActive basado en órdenes filtradas
         };
       });
-      
+
       // Debug logging
       console.log('[CashierPage] Loaded tables:', filteredTables.length);
       filteredTables.forEach(table => {
@@ -144,7 +180,7 @@ export const CashierPage: React.FC = () => {
           console.log(`[CashierPage] Table ${table.tableNumber}: ${table.orders.length} orders, isActive: ${table.isActive}`);
         }
       });
-      
+
       setActiveTables(filteredTables);
     } catch (err) {
       console.error('Error loading active tables:', err);
@@ -154,37 +190,11 @@ export const CashierPage: React.FC = () => {
     }
   };
 
+  /*
   const loadOrderDetails = async (orderId: string) => {
-    try {
-      // Use domain service to get order with items
-      const order = await ordersDomainService.getOrderWithItems(orderId);
-      setSelectedOrder(order);
-      
-      // Convert order items to our format
-      if (order.items && order.items.length > 0) {
-        const items: OrderItem[] = order.items.map(item => ({
-          id: item.id,
-          name: item.productName || `Producto ${item.productId.substring(0, 8)}`, // Use productName if available
-          quantity: item.quantity,
-          price: item.priceSnapshot
-        }));
-        setOrderItems(items);
-      }
-      
-      // Set initial total from order
-      setSubtotal(order.subtotal);
-      setTax(order.tax);
-      setTip(0); // Tip is set during payment
-      
-      // Switch to payment view on mobile
-      if (window.innerWidth < 768) {
-        setViewMode('payment');
-      }
-    } catch (err) {
-      console.error('Error loading order:', err);
-      toast.error('Error al cargar orden');
-    }
+    // ... (rest of the function)
   };
+  */
 
   // Load all orders for a table and combine their items
   const loadAllOrdersForTable = async (table: ActiveTable) => {
@@ -229,7 +239,7 @@ export const CashierPage: React.FC = () => {
       setSubtotal(totalSubtotal);
       setTax(totalTax);
       setTip(0);
-      
+
       // Switch to payment view on mobile
       if (window.innerWidth < 768) {
         setViewMode('payment');
@@ -250,7 +260,7 @@ export const CashierPage: React.FC = () => {
       } else if (menusResponse && typeof menusResponse === 'object' && 'menus' in menusResponse) {
         menus = (menusResponse as any).menus || [];
       }
-      
+
       if (!Array.isArray(menus) || menus.length === 0) {
         setMenuItems([]);
         return;
@@ -278,20 +288,20 @@ export const CashierPage: React.FC = () => {
   const getTableStatus = (table: ActiveTable): TableStatus => {
     // Mesa disponible si no está activa O si no tiene órdenes pendientes
     if (!table.isActive || !table.orders || table.orders.length === 0) return 'available';
-    
+
     // Verificar si alguna orden está servida (todos los items preparados/entregados)
-    const hasServedOrder = table.orders.some(o => 
-      o.orderStatus === 'served' || 
+    const hasServedOrder = table.orders.some(o =>
+      o.orderStatus === 'served' ||
       (o.servedCount !== undefined && o.itemCount > 0 && o.servedCount === o.itemCount)
     );
-    
+
     // Si tiene orden servida, está lista para pagar (verde)
     if (hasServedOrder) return 'ready_to_pay';
-    
+
     // Si tiene check solicitado, también está lista para pagar
     const hasCheckRequested = table.orders.some(o => o.checkRequestedAt);
     if (hasCheckRequested) return 'ready_to_pay';
-    
+
     return 'active';
   };
 
@@ -311,7 +321,7 @@ export const CashierPage: React.FC = () => {
     setSelectedTable(table);
     setCart([]); // Clear cart
     setShowProductSelector(false);
-    
+
     // Load all orders for the table and combine their items
     loadAllOrdersForTable(table);
   };
@@ -342,6 +352,12 @@ export const CashierPage: React.FC = () => {
   };
 
   const handleProcessPayment = async () => {
+    if (!currentSession) {
+      toast.error('Debe abrir la caja antes de procesar pagos');
+      setShowOpenSessionModal(true);
+      return;
+    }
+
     if (total <= 0) {
       toast.error('El monto debe ser mayor a cero');
       return;
@@ -361,18 +377,18 @@ export const CashierPage: React.FC = () => {
             amount: total, // Already includes tip
             currency: 'USD'
           });
-          
+
           // For cash payments, ensure it's processed (backend auto-processes, but we verify)
           // The processPayment endpoint is now idempotent, so it's safe to call even if already completed
           if (paymentMethod === 'cash' && payment.status === 'pending') {
             await paymentsDomainService.processPayment(payment.id);
           }
-          
+
           // Close order after payment (if all items served)
           try {
             await ordersDomainService.closeOrder(selectedOrder.id);
             toast.success('Orden cerrada exitosamente');
-            
+
             // Free the table after closing the order
             if (selectedOrder.tableId) {
               try {
@@ -388,15 +404,15 @@ export const CashierPage: React.FC = () => {
             console.log('Order cannot be closed yet:', closeErr.message);
             toast.warning('Pago procesado. La orden se cerrará cuando todos los items sean servidos.');
           }
-          
+
           toast.success(`Pago ${paymentMethod === 'cash' ? 'en efectivo' : 'con tarjeta'} registrado exitosamente`);
-          
+
           // Clear selection and reset payment state
           setSelectedTable(null);
           setSelectedOrder(null);
           setOrderItems([]);
           resetPayment();
-          
+
           // Wait a moment for backend to process, then reload tables
           // This ensures the table status is updated correctly
           setTimeout(async () => {
@@ -439,7 +455,7 @@ export const CashierPage: React.FC = () => {
       active: [] as ActiveTable[],
       available: [] as ActiveTable[]
     };
-    
+
     activeTables.forEach(table => {
       const status = getTableStatus(table);
       if (status === 'ready_to_pay') {
@@ -450,7 +466,7 @@ export const CashierPage: React.FC = () => {
         grouped.available.push(table);
       }
     });
-    
+
     return grouped;
   }, [activeTables]);
 
@@ -507,9 +523,8 @@ export const CashierPage: React.FC = () => {
       {/* Main Content - Adaptive Layout */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Left: Tables Panel - Adaptive */}
-        <div className={`${
-          viewMode === 'payment' ? 'hidden' : 'flex'
-        } lg:flex flex-col w-full lg:w-1/2 border-r-0 lg:border-r-4 border-indigo-300 bg-white/90 backdrop-blur-sm overflow-hidden`}>
+        <div className={`${viewMode === 'payment' ? 'hidden' : 'flex'
+          } lg:flex flex-col w-full lg:w-1/2 border-r-0 lg:border-r-4 border-indigo-300 bg-white/90 backdrop-blur-sm overflow-hidden`}>
           <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-indigo-50 to-purple-50">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg sm:text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -523,16 +538,15 @@ export const CashierPage: React.FC = () => {
                 🔄
               </button>
             </div>
-            
+
             {/* Mobile: Tabs for table status */}
             <div className="lg:hidden flex gap-2 overflow-x-auto pb-2">
               <button
                 onClick={() => setViewMode('tables')}
-                className={`px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap btn-touch ${
-                  viewMode === 'tables'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap btn-touch ${viewMode === 'tables'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-200 text-gray-700'
+                  }`}
               >
                 Mesas ({activeTables.length})
               </button>
@@ -570,7 +584,7 @@ export const CashierPage: React.FC = () => {
                     onClick={() => handleTableSelect(table)}
                   />
                 ))}
-                
+
                 {/* Active tables */}
                 {tablesByStatus.active.map(table => (
                   <TableCard
@@ -581,7 +595,7 @@ export const CashierPage: React.FC = () => {
                     onClick={() => handleTableSelect(table)}
                   />
                 ))}
-                
+
                 {/* Available tables */}
                 {tablesByStatus.available.map(table => (
                   <TableCard
@@ -598,9 +612,8 @@ export const CashierPage: React.FC = () => {
         </div>
 
         {/* Right: Payment Panel - Always Visible on Desktop, Toggle on Mobile */}
-        <div className={`${
-          viewMode === 'tables' && window.innerWidth < 1024 ? 'hidden' : 'flex'
-        } flex-col w-full lg:w-1/2 bg-gradient-to-br from-purple-50 via-pink-50 to-orange-50 overflow-hidden`}>
+        <div className={`${viewMode === 'tables' && window.innerWidth < 1024 ? 'hidden' : 'flex'
+          } flex-col w-full lg:w-1/2 bg-gradient-to-br from-purple-50 via-pink-50 to-orange-50 overflow-hidden`}>
           {/* Payment Summary - Always Visible and Priority */}
           <div className="bg-gradient-to-br from-green-500 to-emerald-600 text-white p-4 sm:p-6 shadow-2xl border-b-4 border-green-400">
             <p className="text-sm sm:text-base font-semibold mb-2 opacity-90">TOTAL A PAGAR</p>
@@ -646,7 +659,7 @@ export const CashierPage: React.FC = () => {
                     </div>
                   ))}
                 </div>
-                
+
                 {/* Subtotal and Tax */}
                 <div className="mt-4 pt-4 border-t-2 border-gray-200 space-y-1">
                   <div className="flex justify-between text-sm">
@@ -779,17 +792,16 @@ export const CashierPage: React.FC = () => {
                   <p className="text-lg font-bold text-gray-500">Sin propina</p>
                 ) : null}
               </div>
-              
+
               {/* Quick Tip Chips */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                 {/* Sin Propina (0%) */}
                 <button
                   onClick={() => handleTipQuickSelect(0)}
-                  className={`py-4 rounded-xl font-bold text-base transition active:scale-95 btn-touch ${
-                    tipPercentage === 0
-                      ? 'bg-gradient-to-r from-gray-500 to-gray-600 text-white shadow-lg'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                  className={`py-4 rounded-xl font-bold text-base transition active:scale-95 btn-touch ${tipPercentage === 0
+                    ? 'bg-gradient-to-r from-gray-500 to-gray-600 text-white shadow-lg'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                 >
                   0%
                   <p className="text-xs mt-1">Sin propina</p>
@@ -798,18 +810,17 @@ export const CashierPage: React.FC = () => {
                   <button
                     key={percent}
                     onClick={() => handleTipQuickSelect(parseInt(percent))}
-                    className={`py-4 rounded-xl font-bold text-base transition active:scale-95 btn-touch ${
-                      tipPercentage === parseInt(percent)
-                        ? 'bg-gradient-to-r from-blue-500 to-cyan-600 text-white shadow-lg'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+                    className={`py-4 rounded-xl font-bold text-base transition active:scale-95 btn-touch ${tipPercentage === parseInt(percent)
+                      ? 'bg-gradient-to-r from-blue-500 to-cyan-600 text-white shadow-lg'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
                   >
                     {percent}
                     <p className="text-xs mt-1">${amount.toFixed(2)}</p>
                   </button>
                 ))}
               </div>
-              
+
               {/* Custom Tip Button */}
               <button
                 onClick={handleTipCustom}
@@ -827,22 +838,20 @@ export const CashierPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setPaymentMethod('cash')}
-                  className={`py-6 rounded-xl font-bold text-lg transition active:scale-95 btn-touch border-4 ${
-                    paymentMethod === 'cash'
-                      ? 'bg-gradient-to-br from-green-500 to-emerald-600 text-white border-green-400 shadow-xl'
-                      : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
-                  }`}
+                  className={`py-6 rounded-xl font-bold text-lg transition active:scale-95 btn-touch border-4 ${paymentMethod === 'cash'
+                    ? 'bg-gradient-to-br from-green-500 to-emerald-600 text-white border-green-400 shadow-xl'
+                    : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                    }`}
                 >
                   <span className="text-4xl block mb-2">💵</span>
                   <span>Efectivo</span>
                 </button>
                 <button
                   onClick={() => setPaymentMethod('card')}
-                  className={`py-6 rounded-xl font-bold text-lg transition active:scale-95 btn-touch border-4 ${
-                    paymentMethod === 'card'
-                      ? 'bg-gradient-to-br from-blue-500 to-cyan-600 text-white border-blue-400 shadow-xl'
-                      : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
-                  }`}
+                  className={`py-6 rounded-xl font-bold text-lg transition active:scale-95 btn-touch border-4 ${paymentMethod === 'card'
+                    ? 'bg-gradient-to-br from-blue-500 to-cyan-600 text-white border-blue-400 shadow-xl'
+                    : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                    }`}
                 >
                   <span className="text-4xl block mb-2">💳</span>
                   <span>Tarjeta</span>
@@ -856,13 +865,12 @@ export const CashierPage: React.FC = () => {
             <button
               onClick={handleProcessPayment}
               disabled={processing || total <= 0}
-              className={`w-full py-6 rounded-xl font-bold text-xl transition active:scale-95 shadow-2xl border-4 ${
-                processing || total <= 0
-                  ? 'bg-gray-400 text-white cursor-not-allowed border-gray-300'
-                  : paymentMethod === 'cash'
+              className={`w-full py-6 rounded-xl font-bold text-xl transition active:scale-95 shadow-2xl border-4 ${processing || total <= 0
+                ? 'bg-gray-400 text-white cursor-not-allowed border-gray-300'
+                : paymentMethod === 'cash'
                   ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white border-green-400'
                   : 'bg-gradient-to-r from-blue-500 to-cyan-600 hover:from-blue-600 hover:to-cyan-700 text-white border-blue-400'
-              }`}
+                }`}
             >
               {processing ? (
                 <span className="flex items-center justify-center gap-2">
@@ -902,14 +910,14 @@ export const CashierPage: React.FC = () => {
                 ✕
               </button>
             </div>
-            
+
             <div className="p-6">
               <div className="mb-4 p-4 bg-gray-900 rounded-xl">
                 <p className="text-green-400 text-4xl font-bold font-mono text-right">
                   ${numpadValue || '0.00'}
                 </p>
               </div>
-              
+
               <div className="grid grid-cols-3 gap-3 mb-4">
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
                   <button
@@ -943,7 +951,7 @@ export const CashierPage: React.FC = () => {
                   .
                 </button>
               </div>
-              
+
               <button
                 onClick={handleNumpadConfirm}
                 className="w-full py-5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold text-lg btn-touch transition active:scale-95"
@@ -964,6 +972,35 @@ export const CashierPage: React.FC = () => {
         isOpen={showPaidOrders}
         onClose={() => setShowPaidOrders(false)}
       />
+
+      {/* Opening Session Modal */}
+      <Modal
+        isOpen={showOpenSessionModal}
+        title="💰 Apertura de Caja"
+        onClose={currentSession ? () => setShowOpenSessionModal(false) : undefined}
+      >
+        <div className="space-y-4">
+          <p className="text-gray-600">Ingrese el monto inicial de efectivo en caja para comenzar el turno.</p>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Monto Inicial ($)</label>
+            <input
+              type="number"
+              value={openingBalanceInput}
+              onChange={(e) => setOpeningBalanceInput(e.target.value)}
+              placeholder="0.00"
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-xl font-mono focus:border-indigo-500 outline-none transition"
+              autoFocus
+            />
+          </div>
+          <button
+            onClick={handleOpenSession}
+            disabled={processing}
+            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg btn-touch transition active:scale-95 disabled:bg-gray-400"
+          >
+            {processing ? 'Abriendo...' : 'Abrir Caja'}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 };
@@ -978,13 +1015,13 @@ const TableCard: React.FC<{
   // Force available status if table is not active or has no orders
   const isActuallyAvailable = !table.isActive || !table.orders || table.orders.length === 0;
   const actualStatus = isActuallyAvailable ? 'available' : status;
-  
+
   // Only calculate total if table has orders and is active
-  const totalAmount = (!isActuallyAvailable && table.isActive && table.orders && table.orders.length > 0) 
-    ? table.orders.reduce((sum, o) => sum + o.total, 0) 
+  const totalAmount = (!isActuallyAvailable && table.isActive && table.orders && table.orders.length > 0)
+    ? table.orders.reduce((sum, o) => sum + o.total, 0)
     : 0;
-  const hasCheckRequested = table.orders && table.orders.length > 0 
-    ? table.orders.some(o => o.checkRequestedAt) 
+  const hasCheckRequested = table.orders && table.orders.length > 0
+    ? table.orders.some(o => o.checkRequestedAt)
     : false;
 
   const getStatusConfig = () => {
@@ -1022,17 +1059,15 @@ const TableCard: React.FC<{
   return (
     <button
       onClick={onClick}
-      className={`p-4 sm:p-5 rounded-xl shadow-lg border-2 transition-all duration-200 btn-touch-lg min-h-[120px] flex flex-col justify-between ${
-        isSelected
-          ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white border-indigo-700 scale-105 shadow-2xl'
-          : `${config.bg} ${config.border} ${config.textColor} hover:shadow-xl`
-      }`}
+      className={`p-4 sm:p-5 rounded-xl shadow-lg border-2 transition-all duration-200 btn-touch-lg min-h-[120px] flex flex-col justify-between ${isSelected
+        ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white border-indigo-700 scale-105 shadow-2xl'
+        : `${config.bg} ${config.border} ${config.textColor} hover:shadow-xl`
+        }`}
     >
       <div className="text-center">
         <div className="text-3xl sm:text-4xl mb-2">{config.icon}</div>
-        <h3 className={`font-bold text-xl sm:text-2xl mb-1 ${
-          isSelected ? 'text-white' : config.textColor
-        }`}>
+        <h3 className={`font-bold text-xl sm:text-2xl mb-1 ${isSelected ? 'text-white' : config.textColor
+          }`}>
           {table.tableNumber}
         </h3>
         {hasCheckRequested && !isSelected && actualStatus !== 'available' && (
@@ -1041,45 +1076,38 @@ const TableCard: React.FC<{
           </span>
         )}
       </div>
-      
+
       {actualStatus !== 'available' && !isActuallyAvailable && table.isActive && table.orders && table.orders.length > 0 && (
-        <div className={`mt-2 pt-2 border-t ${
-          isSelected ? 'border-white/30' : 'border-gray-300'
-        }`}>
-          <p className={`text-xs font-semibold mb-1 ${
-            isSelected ? 'text-white/90' : config.textColor
+        <div className={`mt-2 pt-2 border-t ${isSelected ? 'border-white/30' : 'border-gray-300'
           }`}>
+          <p className={`text-xs font-semibold mb-1 ${isSelected ? 'text-white/90' : config.textColor
+            }`}>
             {config.label}
           </p>
           {table.orders.length > 0 && (
-            <p className={`text-sm font-semibold ${
-              isSelected ? 'text-white' : config.textColor
-            }`}>
+            <p className={`text-sm font-semibold ${isSelected ? 'text-white' : config.textColor
+              }`}>
               {table.orders.length} {table.orders.length === 1 ? 'orden' : 'órdenes'}
             </p>
           )}
           {totalAmount > 0 && (
-            <p className={`text-lg sm:text-xl font-bold ${
-              isSelected ? 'text-white' : config.textColor
-            }`}>
+            <p className={`text-lg sm:text-xl font-bold ${isSelected ? 'text-white' : config.textColor
+              }`}>
               ${totalAmount.toFixed(2)}
             </p>
           )}
         </div>
       )}
-      
+
       {actualStatus === 'available' && (
-        <div className={`mt-2 pt-2 border-t ${
-          isSelected ? 'border-white/30' : 'border-gray-300'
-        }`}>
-          <p className={`text-xs font-semibold ${
-            isSelected ? 'text-white/75' : 'text-gray-500'
+        <div className={`mt-2 pt-2 border-t ${isSelected ? 'border-white/30' : 'border-gray-300'
           }`}>
+          <p className={`text-xs font-semibold ${isSelected ? 'text-white/75' : 'text-gray-500'
+            }`}>
             ○ Disponible
           </p>
-          <p className={`text-xs ${
-            isSelected ? 'text-white/60' : 'text-gray-400'
-          }`}>
+          <p className={`text-xs ${isSelected ? 'text-white/60' : 'text-gray-400'
+            }`}>
             $0.00
           </p>
         </div>

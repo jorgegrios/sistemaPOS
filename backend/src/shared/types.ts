@@ -4,7 +4,7 @@
  */
 
 export type OrderStatus = 'draft' | 'sent_to_kitchen' | 'served' | 'closed' | 'cancelled';
-export type OrderItemStatus = 'pending' | 'sent' | 'prepared' | 'served';
+export type OrderItemStatus = 'pending' | 'sent' | 'prepared' | 'served' | 'cancelled';
 export type TableStatus = 'free' | 'occupied' | 'reserved';
 export type PaymentMethod = 'cash' | 'card' | 'split';
 export type PaymentStatus = 'pending' | 'completed';

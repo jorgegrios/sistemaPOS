@@ -1,0 +1,60 @@
+import dotenv from 'dotenv';
+dotenv.config(); // ← MOVER AQUÍ, ANTES DE TODO
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import http from 'http';
+import os from 'os';
+import { Server as SocketIOServer } from 'socket.io';
+import swaggerUi from 'swagger-ui-express';
+import paymentsRouter from './routes/payments';
+import ordersRouter from './routes/orders';
+import menusRouter from './routes/menus';
+import webhooksRouter from './routes/webhooks';
+import authRouter, { verifyToken } from './routes/auth';
+import printersRouter from './routes/printers';
+import inventoryRouter from './routes/inventory';
+import purchasesRouter from './routes/purchases';
+import aiAnalysisRouter from './routes/ai-analysis';
+import dashboardRouter from './routes/dashboard';
+import tablesRouter from './routes/tables';
+import cashierRouter from './routes/cashier';
+import menuCostsRouter from './routes/menu-costs';
+import advancedCostingRouter from './routes/advanced-costing';
+import dynamicPricingRouter from './routes/dynamic-pricing';
+import { swaggerSpec } from './swagger';
+import { 
+  initSentry, 
+  initDataDog, 
+  errorTrackingMiddleware, 
+  requestTrackingMiddleware 
+} from './middleware/monitoring';
+import { applyIndexes } from './config/performance';
+import { Pool } from 'pg';
+import kitchenPrintService from './services/kitchenPrintService';
+import printerService from './services/printerService';
+import printerDiscovery from './services/printerDiscovery';
+
+// Domain-based routes (new modular architecture)
+import ordersDomainRouter from './domains/orders/routes';
+import tablesDomainRouter from './domains/tables/routes';
+import productsDomainRouter from './domains/products/routes';
+import kitchenDomainRouter from './domains/kitchen/routes';
+import barDomainRouter from './domains/bar/routes';
+import paymentsDomainRouter from './domains/payments/routes';
+import cashierDomainRouter from './domains/cashier/routes';
+
+// Event listeners for domain communication
+import { onEvent, DomainEventType } from './shared/events';
+import { TablesService } from './domains/tables/service';
+import { OrdersService } from './domains/orders/service';
+import { pool } from './shared/db';
+import { CashierDomainService } from './domains/cashier/service';
+
+const app = express();
+const server = http.createServer(app);
+const io = new SocketIOServer(server, { cors: { origin: '*' } });
+
+// ... rest of the file

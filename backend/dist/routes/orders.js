@@ -8,6 +8,7 @@ const pg_1 = require("pg");
 const uuid_1 = require("uuid");
 const kitchenPrintService_1 = __importDefault(require("../services/kitchenPrintService"));
 const receiptService_1 = __importDefault(require("../services/receiptService"));
+const auth_1 = require("./auth");
 const router = (0, express_1.Router)();
 const pool = new pg_1.Pool({ connectionString: process.env.DATABASE_URL });
 /**
@@ -66,35 +67,66 @@ router.post('/', async (req, res) => {
  * GET /api/v1/orders
  * List all orders with filtering
  */
-/**
- * GET /api/v1/orders
- * List all orders with filtering
- */
-router.get('/', async (req, res) => {
+router.get('/', auth_1.verifyToken, async (req, res) => {
     try {
-        const { status, limit = 50, offset = 0 } = req.query;
-        let query = 'SELECT * FROM orders';
-        const params = [];
-        if (status) {
-            query += ' WHERE status = $1';
-            params.push(status);
+        const restaurantId = req.user?.restaurantId;
+        if (!restaurantId) {
+            return res.status(400).json({ error: 'Restaurant ID required' });
         }
-        query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
-        params.push(limit, offset);
+        const { status, limit = 50, offset = 0 } = req.query;
+        // Mapear estados del frontend a estados de la base de datos
+        const statusMap = {
+            'pending': ['draft', 'pending', 'sent_to_kitchen'],
+            'completed': ['completed', 'served', 'closed'],
+            'cancelled': ['cancelled']
+        };
+        let query = `
+      SELECT o.*, t.table_number, t.name as table_name
+      FROM orders o
+      LEFT JOIN tables t ON o.table_id = t.id
+      WHERE t.restaurant_id = $1
+    `;
+        const params = [restaurantId];
+        let paramIndex = 2;
+        if (status && statusMap[status]) {
+            const statuses = statusMap[status];
+            query += ` AND o.status = ANY($${paramIndex})`;
+            params.push(statuses);
+            paramIndex++;
+        }
+        query += ` ORDER BY o.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        params.push(parseInt(limit), parseInt(offset));
+        console.log('[Orders] Query:', query);
+        console.log('[Orders] Params:', params);
         const result = await pool.query(query, params);
         // Obtener items para cada orden
         const ordersWithItems = await Promise.all(result.rows.map(async (row) => {
             const itemsResult = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [row.id]);
+            // Mapear el estado de la BD al estado del frontend
+            let frontendStatus = row.status;
+            if (statusMap.pending.includes(row.status)) {
+                frontendStatus = 'pending';
+            }
+            else if (statusMap.completed.includes(row.status)) {
+                frontendStatus = 'completed';
+            }
+            else if (statusMap.cancelled.includes(row.status)) {
+                frontendStatus = 'cancelled';
+            }
             return {
                 id: row.id,
                 orderNumber: row.order_number,
-                status: row.status,
+                status: frontendStatus,
                 paymentStatus: row.payment_status,
                 subtotal: parseFloat(row.subtotal),
                 tax: parseFloat(row.tax),
+                tip: parseFloat(row.tip || 0),
+                discount: parseFloat(row.discount || 0),
                 total: parseFloat(row.total),
                 createdAt: row.created_at,
                 paidAt: row.paid_at,
+                tableId: row.table_id,
+                tableNumber: row.table_number || row.table_name,
                 items: itemsResult.rows.map(item => ({
                     id: item.id,
                     name: item.name,
@@ -104,8 +136,24 @@ router.get('/', async (req, res) => {
                 }))
             };
         }));
+        // Obtener el total de órdenes (sin límite)
+        const countQuery = `
+      SELECT COUNT(*) as total
+      FROM orders o
+      LEFT JOIN tables t ON o.table_id = t.id
+      WHERE t.restaurant_id = $1
+      ${status && statusMap[status] ? `AND o.status = ANY($2)` : ''}
+    `;
+        const countParams = [restaurantId];
+        if (status && statusMap[status]) {
+            countParams.push(statusMap[status]);
+        }
+        const countResult = await pool.query(countQuery, countParams);
+        const total = parseInt(countResult.rows[0].total);
+        console.log('[Orders] Returning', ordersWithItems.length, 'orders (total:', total, ')');
         return res.json({
             orders: ordersWithItems,
+            total: total,
             count: ordersWithItems.length
         });
     }

@@ -6,8 +6,8 @@
 import { getApiBaseUrl } from '../utils/api-config';
 
 // Usar la función de configuración que detecta automáticamente la IP
-// getApiBaseUrl ya retorna la URL completa con /api/v1, pero algunos endpoints usan /api directamente
-const API_BASE_URL = getApiBaseUrl().replace('/v1', '') || '/api';
+// getApiBaseUrl already returns the full URL with /api/v1
+const API_BASE_URL = getApiBaseUrl();
 const TOKEN_KEY = 'pos_token';
 const REFRESH_TOKEN_KEY = 'pos_refresh_token';
 const RESTAURANT_ID_KEY = 'pos_restaurant_id';

@@ -96,6 +96,27 @@ export interface PaidOrdersResponse {
   offset: number;
 }
 
+export interface CashSession {
+  id: string;
+  restaurantId: string;
+  userId: string;
+  openedAt: string;
+  closedAt?: string;
+  openingBalance: number;
+  expectedBalance: number;
+  actualBalance?: number;
+  status: 'open' | 'closed';
+}
+
+export interface CashMovement {
+  id: string;
+  sessionId: string;
+  type: 'in' | 'out';
+  amount: number;
+  description: string;
+  createdAt: string;
+}
+
 class CashierService {
   /**
    * Get active tables (tables with pending orders)
@@ -120,7 +141,7 @@ class CashierService {
     if (date) params.append('date', date);
     if (limit) params.append('limit', limit.toString());
     if (offset) params.append('offset', offset.toString());
-    
+
     const query = params.toString();
     const url = `/v1/cashier/paid-orders${query ? `?${query}` : ''}`;
     console.log('[CashierService] Fetching paid orders from:', url);
@@ -133,7 +154,38 @@ class CashierService {
       throw error;
     }
   }
+
+  /**
+   * Get current open cash session
+   */
+  async getCurrentSession(): Promise<CashSession | null> {
+    const response = await apiClient.get<{ session: CashSession | null }>('/v2/cashier/sessions/current');
+    return response.session;
+  }
+
+  /**
+   * Open a new cash session
+   */
+  async openSession(openingBalance: number): Promise<CashSession> {
+    const response = await apiClient.post<{ session: CashSession }>('/v2/cashier/sessions/open', { openingBalance });
+    return response.session;
+  }
+
+  /**
+   * Close a cash session
+   */
+  async closeSession(sessionId: string, actualBalance: number): Promise<CashSession> {
+    const response = await apiClient.post<{ session: CashSession }>(`/v2/cashier/sessions/${sessionId}/close`, { actualBalance });
+    return response.session;
+  }
+
+  /**
+   * Add manual cash movement
+   */
+  async addMovement(request: { sessionId: string; type: 'in' | 'out'; amount: number; description: string }): Promise<CashMovement> {
+    const response = await apiClient.post<{ movement: CashMovement }>('/v2/cashier/movements', request);
+    return response.movement;
+  }
 }
 
 export const cashierService = new CashierService();
-

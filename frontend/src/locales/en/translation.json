@@ -1,0 +1,62 @@
+{
+    "common": {
+        "loading": "Loading...",
+        "error": "Error",
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "actions": "Actions",
+        "logout": "Logout",
+        "exit": "Exit",
+        "status": "Status"
+    },
+    "nav": {
+        "dashboard": "Dashboard",
+        "orders": "Orders",
+        "kitchen": "Kitchen",
+        "bar": "Bar",
+        "menu": "Menu",
+        "payments": "Payments",
+        "inventory": "Inventory",
+        "purchases": "Purchases",
+        "tables": "Tables",
+        "users": "Users",
+        "costs": "Costs",
+        "settings": "Settings"
+    },
+    "login": {
+        "title": "Welcome Back",
+        "subtitle": "Login to your account",
+        "email": "Email Address",
+        "password": "Password",
+        "button": "Sign In",
+        "logging_in": "Signing in...",
+        "error": "Invalid email or password"
+    },
+    "orders": {
+        "new_order": "New Order",
+        "active_order": "Active Order",
+        "table": "Table",
+        "waiter": "Waiter",
+        "items": "Items",
+        "subtotal": "Subtotal",
+        "tax": "Tax",
+        "total": "Total",
+        "cart_empty": "Your cart is empty",
+        "cart_add_hint": "Add products from the list",
+        "in_preparation": "In Preparation:",
+        "send_to_kitchen": "Send to Kitchen",
+        "send_additions": "Send Additions to Kitchen",
+        "mark_served": "Mark as Served",
+        "close_order": "Close Order",
+        "cancel_order": "Cancel Order",
+        "added_to_cart": "Added to cart",
+        "removed_from_cart": "Removed from cart",
+        "order_sent": "Order sent to kitchen",
+        "order_cancelled": "Order cancelled",
+        "item_cancelled": "Product cancelled",
+        "modifiers": "Modifiers",
+        "notes": "Notes",
+        "quantity": "Quantity"
+    }
+}

@@ -10,12 +10,6 @@ export interface IngredientSuggestion {
   reason: string;
 }
 
-interface ParsedIngredient {
-  text: string;
-  startIndex: number;
-  endIndex: number;
-}
-
 class IngredientAnalyzer {
   // Palabras descriptivas que NO son ingredientes
   private descriptiveWords = new Set([
@@ -73,15 +67,15 @@ class IngredientAnalyzer {
 
     const suggestions: IngredientSuggestion[] = [];
     const normalizedDesc = this.normalizeText(description);
-    
+
     // Estrategia 1: Dividir por separadores comunes
     const parts = this.splitBySeparators(normalizedDesc);
-    
+
     // Estrategia 2: Analizar cada parte para identificar ingredientes reales
     for (const part of parts) {
       const trimmed = part.trim();
       if (trimmed.length < 2) continue;
-      
+
       const analysis = this.analyzePart(trimmed, normalizedDesc);
       if (analysis.isIngredient) {
         suggestions.push({
@@ -94,7 +88,7 @@ class IngredientAnalyzer {
 
     // Eliminar duplicados (case-insensitive)
     const uniqueSuggestions = this.removeDuplicates(suggestions);
-    
+
     // Ordenar por confianza (mayor primero)
     return uniqueSuggestions.sort((a, b) => b.confidence - a.confidence);
   }
@@ -116,7 +110,7 @@ class IngredientAnalyzer {
   private splitBySeparators(text: string): string[] {
     // Primero, proteger frases compuestas comunes
     let protectedText = text;
-    
+
     // Proteger frases como "filete de pescado", "a la plancha", etc.
     const phrases = [
       'filete de pescado',
@@ -145,7 +139,7 @@ class IngredientAnalyzer {
 
     // Dividir por separadores
     let parts = protectedText.split(/[,|]/);
-    
+
     // Si no hay comas, intentar dividir por palabras separadoras
     if (parts.length === 1) {
       const separators = /\s+(y|con|además|más|incluye|también|sin)\s+/gi;
@@ -153,11 +147,11 @@ class IngredientAnalyzer {
     }
 
     // Restaurar frases protegidas y limpiar
-    return parts.map(p => 
+    return parts.map(p =>
       p.replace(/_PROTECTED_/g, ' ')
-       .trim()
-       .replace(/^(y|con|además|más|incluye|también|sin)\s+/i, '')
-       .trim()
+        .trim()
+        .replace(/^(y|con|además|más|incluye|también|sin)\s+/i, '')
+        .trim()
     ).filter(p => p.length > 0);
   }
 
@@ -165,21 +159,21 @@ class IngredientAnalyzer {
    * Analiza una parte del texto para determinar si es un ingrediente
    */
   private analyzePart(
-    part: string, 
+    part: string,
     fullDescription: string
   ): { isIngredient: boolean; name: string; confidence: number; reason: string } {
     const trimmed = part.trim();
-    
+
     // Eliminar palabras descriptivas al inicio/final
     let cleaned = trimmed;
     const words = cleaned.split(/\s+/);
-    
+
     // Remover palabras descriptivas del final
     while (words.length > 1 && this.descriptiveWords.has(words[words.length - 1])) {
       words.pop();
       cleaned = words.join(' ');
     }
-    
+
     // Remover palabras descriptivas del inicio (excepto si es un ingrediente conocido con adjetivo)
     if (words.length > 1 && this.descriptiveWords.has(words[0])) {
       // Verificar si el resto es un ingrediente conocido
@@ -290,7 +284,7 @@ class IngredientAnalyzer {
     }
 
     const normalized = ingredient.toLowerCase().trim();
-    
+
     // No debe ser solo una palabra descriptiva
     if (this.descriptiveWords.has(normalized)) {
       return false;

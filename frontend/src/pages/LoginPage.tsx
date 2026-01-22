@@ -6,10 +6,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/auth-context';
+import { useTranslation } from 'react-i18next';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, error: authError } = useAuth();
+  const { t, i18n } = useTranslation();
 
   const [email, setEmail] = useState('mesero1@restaurant.com');
   const [password, setPassword] = useState('mesero123');
@@ -25,7 +27,7 @@ export const LoginPage: React.FC = () => {
       await login(email, password);
       navigate('/');
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Error al iniciar sesión';
+      const errorMsg = err instanceof Error ? err.message : t('login.error');
       setError(errorMsg);
     } finally {
       setLoading(false);
@@ -33,17 +35,27 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center p-4 relative">
+      {/* Floating Language Switcher */}
+      <div className="absolute top-4 right-4">
+        <button
+          onClick={() => i18n.changeLanguage(i18n.language === 'es' ? 'en' : 'es')}
+          className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg backdrop-blur-sm border border-white/20 transition font-bold flex items-center gap-2"
+        >
+          🌐 {i18n.language === 'es' ? 'English' : 'Español'}
+        </button>
+      </div>
+
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">Sistema POS</h1>
-          <p className="text-blue-100">Sistema de Punto de Venta</p>
+          <p className="text-blue-100">{t('login.title')}</p>
         </div>
 
         {/* Card */}
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">Iniciar Sesión</h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-6">{t('login.subtitle')}</h2>
 
           {/* Error Messages */}
           {(error || authError) && (
@@ -57,14 +69,14 @@ export const LoginPage: React.FC = () => {
             {/* Email Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Correo Electrónico
+                {t('login.email')}
               </label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
-                placeholder="Ingresa tu correo"
+                placeholder={t('login.email')}
                 required
                 disabled={loading}
               />
@@ -73,14 +85,14 @@ export const LoginPage: React.FC = () => {
             {/* Password Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Contraseña
+                {t('login.password')}
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
-                placeholder="Ingresa tu contraseña"
+                placeholder={t('login.password')}
                 required
                 disabled={loading}
               />
@@ -94,13 +106,14 @@ export const LoginPage: React.FC = () => {
             >
               {loading ? (
                 <span className="flex items-center justify-center">
-                  <span className="animate-spin mr-2">⏳</span> Validando...
+                  <span className="animate-spin mr-2">⏳</span> {t('login.logging_in')}
                 </span>
               ) : (
-                'Ingresar'
+                t('login.button')
               )}
             </button>
           </form>
+
 
           {/* Test Credentials Info */}
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">

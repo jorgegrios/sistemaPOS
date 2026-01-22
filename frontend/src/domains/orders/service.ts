@@ -150,6 +150,14 @@ class OrdersDomainService {
   }
 
   /**
+   * Cancel or Remove a single item from order
+   */
+  async cancelOrderItem(orderId: string, itemId: string): Promise<void> {
+    if (!navigator.onLine) return;
+    await apiClient.delete(`/v2/orders/${orderId}/items/${itemId}`);
+  }
+
+  /**
    * Send Order to Kitchen (Idempotent)
    * RULE: Does nothing if already sent
    */

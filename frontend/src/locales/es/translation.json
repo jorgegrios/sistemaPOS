@@ -1,0 +1,62 @@
+{
+    "common": {
+        "loading": "Cargando...",
+        "error": "Error",
+        "save": "Guardar",
+        "cancel": "Cancelar",
+        "delete": "Eliminar",
+        "actions": "Acciones",
+        "logout": "Cerrar Sesión",
+        "exit": "Salir",
+        "status": "Estado"
+    },
+    "nav": {
+        "dashboard": "Dashboard",
+        "orders": "Pedidos",
+        "kitchen": "Cocina",
+        "bar": "Bar",
+        "menu": "Menú",
+        "payments": "Pagos",
+        "inventory": "Inventario",
+        "purchases": "Compras",
+        "tables": "Mesas",
+        "users": "Usuarios",
+        "costs": "Costos",
+        "settings": "Configuración"
+    },
+    "login": {
+        "title": "Bienvenido",
+        "subtitle": "Inicia sesión en tu cuenta",
+        "email": "Correo Electrónico",
+        "password": "Contraseña",
+        "button": "Entrar",
+        "logging_in": "Entrando...",
+        "error": "Correo o contraseña incorrectos"
+    },
+    "orders": {
+        "new_order": "Nuevo Pedido",
+        "active_order": "Orden Activa",
+        "table": "Mesa",
+        "waiter": "Mesero",
+        "items": "Items",
+        "subtotal": "Subtotal",
+        "tax": "IVA (10%)",
+        "total": "Total",
+        "cart_empty": "El carrito está vacío",
+        "cart_add_hint": "Agrega productos de la lista",
+        "in_preparation": "En Preparación:",
+        "send_to_kitchen": "Enviar a Cocina",
+        "send_additions": "Enviar Adiciones a Cocina",
+        "mark_served": "Marcar como Servido",
+        "close_order": "Cerrar Orden",
+        "cancel_order": "Cancelar Orden",
+        "added_to_cart": "Agregado al carrito",
+        "removed_from_cart": "Eliminado del carrito",
+        "order_sent": "Orden enviada a cocina",
+        "order_cancelled": "Orden cancelada",
+        "item_cancelled": "Producto cancelado",
+        "modifiers": "Modificadores",
+        "notes": "Notas",
+        "quantity": "Cantidad"
+    }
+}

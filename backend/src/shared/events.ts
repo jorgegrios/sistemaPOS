@@ -19,16 +19,17 @@ export enum DomainEventType {
   ORDER_SERVED = 'order:served',
   ORDER_CLOSED = 'order:closed',
   ORDER_CANCELLED = 'order:cancelled',
-  
+  ORDER_ITEM_CANCELLED = 'order_item:cancelled',
+
   // Kitchen
   ORDER_ITEM_PREPARED = 'order_item:prepared',
   ALL_ITEMS_PREPARED = 'order:all_items_prepared',
-  
+
   // Tables
   TABLE_OCCUPIED = 'table:occupied',
   TABLE_FREED = 'table:freed',
   TABLE_RESERVED = 'table:reserved',
-  
+
   // Payments
   PAYMENT_COMPLETED = 'payment:completed',
   PAYMENT_FAILED = 'payment:failed',
@@ -57,11 +58,18 @@ export interface PaymentCompletedEvent {
   method: PaymentMethod;
 }
 
-export type DomainEventPayload = 
+export interface OrderItemCancelledEvent {
+  orderId: string;
+  itemId: string;
+  previousStatus: string;
+}
+
+export type DomainEventPayload =
   | OrderCreatedEvent
   | OrderSentToKitchenEvent
   | OrderItemPreparedEvent
-  | PaymentCompletedEvent;
+  | PaymentCompletedEvent
+  | OrderItemCancelledEvent;
 
 // Helper to emit events
 export function emitEvent(type: DomainEventType, payload: DomainEventPayload): void {
