@@ -239,6 +239,24 @@ code {
    UTILITIES PARA TABLETS
    ============================================ */
 
+/* ============================================
+   UTILITIES PARA MOBILE & SCROLL
+   ============================================ */
+
+/* Ocultar scrollbar pero mantener funcionalidad */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
+}
+
+/* Scroll suave en touch */
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Clase para forzar layout de desktop en tablets */
 .tablet-desktop-layout {
   min-width: 1024px;

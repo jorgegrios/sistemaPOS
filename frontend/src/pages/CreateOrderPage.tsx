@@ -808,16 +808,16 @@ export const CreateOrderPage: React.FC = () => {
         </div>
       ) : (
         /* Vista de Pedidos - 3 Columnas Iguales */
-        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-          {/* Columna 1: Categorías */}
-          <div className="w-full md:w-1/3 bg-white border-r border-gray-200 flex flex-col overflow-hidden flex-shrink-0">
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+          {/* Columna 1: Categorías (Horizontal en móvil, Vertical en desktop) */}
+          <div className="w-full md:w-1/4 lg:w-1/5 bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col flex-shrink-0">
             <div className="p-2 sm:p-3 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-gray-200 flex-shrink-0">
               <h2 className="text-sm sm:text-base font-bold text-gray-800 flex items-center gap-1.5">
                 <span className="text-base sm:text-lg">🍽️</span>
                 <span>Categorías</span>
               </h2>
               {selectedTable && (
-                <p className="text-xs text-gray-600 mt-1">
+                <p className="hidden md:block text-xs text-gray-600 mt-1">
                   Mesa: <span className="font-semibold">{selectedTable.name}</span>
                 </p>
               )}
@@ -852,15 +852,16 @@ export const CreateOrderPage: React.FC = () => {
                 </div>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto p-2 sm:p-3">
-              <div className="space-y-2">
+            <div className="flex-1 overflow-x-auto md:overflow-y-auto p-2 sm:p-3 scrollbar-hide scroll-touch">
+              <div className="flex md:flex-col gap-2">
                 {categories.map(category => (
                   <button
                     key={category.id}
                     onClick={() => setSelectedCategoryId(category.id)}
                     className={`
-                      w-full px-3 py-3 sm:px-4 sm:py-3 rounded-lg font-semibold text-sm text-left
-                      transition-all duration-200 active:scale-95 min-h-[44px] sm:min-h-[48px]
+                      px-4 py-2.5 sm:px-4 sm:py-3 rounded-lg font-semibold text-sm text-center md:text-left
+                      transition-all duration-200 active:scale-95 min-h-[40px] md:min-h-[48px]
+                      whitespace-nowrap md:whitespace-normal flex-shrink-0
                       ${selectedCategoryId === category.id
                         ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
                         : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-300'
@@ -874,8 +875,8 @@ export const CreateOrderPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Columna 2: Productos */}
-          <div className="w-full md:w-1/3 bg-white border-r border-gray-200 flex flex-col overflow-hidden flex-shrink-0">
+          {/* Columna 2: Productos - Ocupa el resto en móvil */}
+          <div className="flex-1 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
             <div className="p-2 sm:p-3 bg-white border-b border-gray-200 flex-shrink-0">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex-1 min-w-0">
@@ -918,7 +919,7 @@ export const CreateOrderPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 sm:p-3">
+            <div className="flex-1 overflow-y-auto p-2 sm:p-3 scroll-touch">
               {selectedCategoryId ? (
                 categoryProducts.length > 0 ? (
                   <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -986,18 +987,29 @@ export const CreateOrderPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Columna 3: Orden Activa */}
-          <div className="w-full md:w-1/3 bg-white border-l border-gray-200 flex flex-col overflow-hidden flex-shrink-0">
-            <div className="p-2 sm:p-3 border-b border-gray-200 bg-gradient-to-r from-indigo-600 to-purple-600 flex-shrink-0">
-              <h2 className="text-sm sm:text-base font-bold text-white">Orden Activa</h2>
-              {selectedTable && (
-                <p className="text-xs text-indigo-100 mt-1">
-                  Mesa: {selectedTable.name}
-                </p>
-              )}
+          {/* Columna 3: Orden Activa / Carrito */}
+          <div className={`
+            ${showMobileCart ? 'fixed inset-0 z-50 flex' : 'hidden md:flex'}
+            w-full md:w-1/3 lg:w-1/4 bg-white md:border-l border-gray-200 flex flex-col overflow-hidden flex-shrink-0
+          `}>
+            <div className="p-3 sm:p-4 border-b border-gray-200 bg-gradient-to-r from-indigo-600 to-purple-600 flex-shrink-0 flex items-center justify-between">
+              <div>
+                <h2 className="text-base sm:text-lg font-bold text-white">Orden Activa</h2>
+                {selectedTable && (
+                  <p className="text-xs text-indigo-100">
+                    Mesa: {selectedTable.name}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setShowMobileCart(false)}
+                className="md:hidden w-10 h-10 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center text-white"
+              >
+                ✕
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 sm:p-3">
+            <div className="flex-1 overflow-y-auto p-2 sm:p-3 scroll-touch">
               {cart.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="text-6xl mb-4">🛒</div>
