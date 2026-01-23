@@ -10,9 +10,12 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
  * GET /api/v1/menus/:restaurantId
  * Get all menus for a restaurant
  */
-router.get('/:restaurantId', async (req: Request, res: Response) => {
+router.get('/:restaurantId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { restaurantId } = req.params;
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
 
     const result = await pool.query(
       `SELECT m.id, m.name, m.description, 
@@ -21,10 +24,10 @@ router.get('/:restaurantId', async (req: Request, res: Response) => {
        FROM menus m
        LEFT JOIN menu_categories mc ON m.id = mc.menu_id
        LEFT JOIN menu_items mi ON mc.id = mi.category_id
-       WHERE m.restaurant_id = $1 AND m.active = true
+       WHERE m.restaurant_id = $1 AND m.company_id = $2 AND m.active = true
        GROUP BY m.id
        ORDER BY m.created_at`,
-      [restaurantId]
+      [restaurantId, companyId]
     );
 
     return res.json({
@@ -46,23 +49,26 @@ router.get('/:restaurantId', async (req: Request, res: Response) => {
  * GET /api/v1/menus/:restaurantId/:menuId
  * Get menu with categories and items
  */
-router.get('/:restaurantId/:menuId', async (req: Request, res: Response) => {
+router.get('/:restaurantId/:menuId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { restaurantId, menuId } = req.params;
+    const companyId = req.user?.companyId;
 
-    // Get menu
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Get menu with company check
     const menuResult = await pool.query(
-      'SELECT * FROM menus WHERE id = $1 AND restaurant_id = $2',
-      [menuId, restaurantId]
+      'SELECT * FROM menus WHERE id = $1 AND restaurant_id = $2 AND company_id = $3',
+      [menuId, restaurantId, companyId]
     );
 
     if (menuResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Menu not found' });
+      return res.status(404).json({ error: 'Menu not found or unauthorized' });
     }
 
     const menu = menuResult.rows[0];
 
-    // Get categories with items and metadata
+    // Get categories with items (isolation ensured by menuId check)
     const categoriesResult = await pool.query(
       `SELECT mc.id, mc.name, mc.display_order, COALESCE(mc.metadata, '{}'::jsonb) as metadata,
         json_agg(json_build_object(
@@ -92,10 +98,10 @@ router.get('/:restaurantId/:menuId', async (req: Request, res: Response) => {
         name: row.name,
         displayOrder: row.display_order,
         metadata: row.metadata || {},
-        items: row.items.filter((i: any) => i.id !== null).map((item: any) => ({
+        items: (row.items || []).filter((i: any) => i.id !== null).map((item: any) => ({
           ...item,
           metadata: item.metadata || {}
-        })) // Filter out null items and ensure metadata exists
+        }))
       }))
     });
   } catch (error: any) {
@@ -112,16 +118,16 @@ router.post('/:restaurantId', verifyToken, async (req: AuthRequest, res: Respons
   try {
     const { restaurantId } = req.params;
     const { name, description } = req.body;
+    const companyId = req.user?.companyId;
 
-    if (!name) {
-      return res.status(400).json({ error: 'Menu name is required' });
-    }
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!name) return res.status(400).json({ error: 'Menu name is required' });
 
     const menuId = uuidv4();
     await pool.query(
-      `INSERT INTO menus (id, restaurant_id, name, description, active)
-       VALUES ($1, $2, $3, $4, true)`,
-      [menuId, restaurantId, name, description || null]
+      `INSERT INTO menus (id, restaurant_id, company_id, name, description, active)
+       VALUES ($1, $2, $3, $4, $5, true)`,
+      [menuId, restaurantId, companyId, name, description || null]
     );
 
     return res.status(201).json({
@@ -144,15 +150,14 @@ router.post('/categories', verifyToken, async (req: AuthRequest, res: Response) 
   try {
     const { menuId, name, displayOrder } = req.body;
 
-    if (!menuId || !name) {
-      return res.status(400).json({ error: 'Menu ID and category name are required' });
-    }
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
 
     const categoryId = uuidv4();
     await pool.query(
-      `INSERT INTO menu_categories (id, menu_id, name, display_order)
-       VALUES ($1, $2, $3, $4)`,
-      [categoryId, menuId, name, displayOrder || 0]
+      `INSERT INTO menu_categories (id, menu_id, company_id, name, display_order)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [categoryId, menuId, companyId, name, displayOrder || 0]
     );
 
     return res.status(201).json({
@@ -196,10 +201,14 @@ router.put('/categories/:id', verifyToken, async (req: AuthRequest, res: Respons
       return res.status(400).json({ error: 'No fields to update' });
     }
 
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     params.push(id);
+    params.push(companyId);
 
     const result = await pool.query(
-      `UPDATE menu_categories SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+      `UPDATE menu_categories SET ${updates.join(', ')} WHERE id = $${paramCount} AND company_id = $${paramCount + 1} RETURNING *`,
       params
     );
 
@@ -227,9 +236,12 @@ router.delete('/categories/:id', verifyToken, async (req: AuthRequest, res: Resp
   try {
     const { id } = req.params;
 
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     const result = await pool.query(
-      'DELETE FROM menu_categories WHERE id = $1 RETURNING id',
-      [id]
+      'DELETE FROM menu_categories WHERE id = $1 AND company_id = $2 RETURNING id',
+      [id, companyId]
     );
 
     if (result.rows.length === 0) {
@@ -251,9 +263,8 @@ router.post('/items', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { categoryId, name, description, price, imageUrl, available, metadata } = req.body;
 
-    if (!categoryId || !name || price === undefined) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
 
     const itemId = uuidv4();
 
@@ -261,15 +272,16 @@ router.post('/items', verifyToken, async (req: AuthRequest, res: Response) => {
     const metadataJson = metadata || (imageUrl ? { imageUrl } : null);
 
     await pool.query(
-      `INSERT INTO menu_items (id, category_id, name, description, price, base_price, image_url, available, metadata)
-       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)`,
+      `INSERT INTO menu_items (id, company_id, category_id, name, description, price, base_price, image_url, available, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9)`,
       [
-        itemId, 
-        categoryId, 
-        name, 
-        description || null, 
-        price, 
-        imageUrl || null, 
+        itemId,
+        companyId,
+        categoryId,
+        name,
+        description || null,
+        price,
+        imageUrl || null,
         available !== false,
         metadataJson ? JSON.stringify(metadataJson) : null
       ]
@@ -381,10 +393,14 @@ router.put('/items/:id', verifyToken, async (req: AuthRequest, res: Response) =>
       return res.status(400).json({ error: 'No fields to update' });
     }
 
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     params.push(id);
+    params.push(companyId);
 
     const result = await pool.query(
-      `UPDATE menu_items SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+      `UPDATE menu_items SET ${updates.join(', ')} WHERE id = $${paramCount} AND company_id = $${paramCount + 1} RETURNING *`,
       params
     );
 
@@ -416,9 +432,12 @@ router.delete('/items/:id', verifyToken, async (req: AuthRequest, res: Response)
   try {
     const { id } = req.params;
 
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     const result = await pool.query(
-      'DELETE FROM menu_items WHERE id = $1 RETURNING id',
-      [id]
+      'DELETE FROM menu_items WHERE id = $1 AND company_id = $2 RETURNING id',
+      [id, companyId]
     );
 
     if (result.rows.length === 0) {

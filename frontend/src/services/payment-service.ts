@@ -1,188 +1,89 @@
 /**
  * Payment Service
  * Handles payment processing with multiple providers
+ * SSOT: Updated for modular v2 API with fiscal breakdown and PCI compliance
  */
 
 import { apiClient } from './api-client';
 
-export type PaymentProvider = 'stripe' | 'square' | 'mercado_pago' | 'paypal';
+export type PaymentMethod = 'card' | 'cash' | 'qr' | 'wallet' | 'split';
+export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'refunded';
+
+export interface PaymentPrintData {
+  orderId: string;
+  transactionId: string;
+  amount: number;
+  method: string;
+  subtotal: number;
+  tax: number;
+  serviceCharge: number;
+  tip: number;
+  maskedCard?: string;
+  timestamp: string;
+}
 
 export interface Payment {
   id: string;
-  transaction_id?: string;
-  transactionId?: string;
-  order_id?: string;
-  orderId?: string;
-  payment_provider?: string;
-  provider: PaymentProvider;
+  orderId: string;
+  method: PaymentMethod;
   amount: number;
+  status: PaymentStatus;
   currency: string;
-  status: 'pending' | 'succeeded' | 'failed' | 'refunded';
-  created_at?: string;
-  createdAt?: string;
+  createdAt: string;
+  completedAt?: string;
+  subtotalAmount?: number;
+  taxAmount?: number;
+  serviceCharge?: number;
+  tipAmount?: number;
+  maskedCard?: string;
+  transactionId?: string;
+  print_data?: PaymentPrintData;
 }
 
 export interface ProcessPaymentRequest {
-  orderId?: string; // Optional: can be undefined for general payments
-  provider: PaymentProvider;
+  orderId: string;
+  method: PaymentMethod;
   amount: number;
   currency?: string;
-  method?: 'card' | 'cash' | 'qr' | 'wallet';
-  paymentMethodId?: string;
-  token?: string;
-  idempotencyKey?: string;
-  tip?: number;
-  metadata?: Record<string, any>;
-}
-
-export interface RefundRequest {
-  amount?: number;
-  reason?: string;
+  subtotalAmount?: number;
+  taxAmount?: number;
+  serviceCharge?: number;
+  tipAmount?: number;
+  paymentToken?: string; // PCI Token for cards
 }
 
 class PaymentService {
   /**
-   * Process a payment through a provider
+   * Process a payment through the modular v2 API
    */
   async processPayment(data: ProcessPaymentRequest): Promise<Payment> {
-    // Map frontend format to backend format
-    const backendData = {
-      orderId: data.orderId,
-      amount: data.amount,
-      currency: data.currency || 'USD',
-      method: data.method || 'card',
-      provider: data.provider,
-      paymentMethodId: data.paymentMethodId || data.token,
-      idempotencyKey: data.idempotencyKey,
-      tip: data.tip,
-      metadata: data.metadata
-    };
-    return apiClient.post<Payment>('/v1/payments/process', backendData);
+    // PRECAUCIÓN: EL FRONTEND NUNCA DEBE ENVIAR PAN O CVV DIRECTAMENTE AL BACKEND.
+    // Solo enviamos tokens generados por el SDK del proveedor.
+    return apiClient.post<Payment>('/v2/payments', data);
   }
 
   /**
    * Get payment details
    */
   async getPayment(paymentId: string): Promise<Payment> {
-    return apiClient.get<Payment>(`/v1/payments/${paymentId}`);
+    return apiClient.get<Payment>(`/v2/payments/${paymentId}`);
   }
 
   /**
-   * Refund a payment
+   * Get payments for a specific order
    */
-  async refundPayment(paymentId: string, data?: RefundRequest): Promise<Payment> {
-    return apiClient.post<Payment>(`/v1/payments/${paymentId}/refund`, data || {});
+  async getOrderPayments(orderId: string): Promise<{ payments: Payment[] }> {
+    return apiClient.get<{ payments: Payment[] }>(`/v2/payments/order/${orderId}`);
   }
 
   /**
-   * Process payment with Stripe
-   */
-  async processStripePayment(
-    orderId: string,
-    amount: number,
-    token: string,
-    currency: string = 'USD'
-  ): Promise<Payment> {
-    return this.processPayment({
-      orderId,
-      provider: 'stripe',
-      amount,
-      currency,
-      token,
-      metadata: { provider: 'stripe' }
-    });
-  }
-
-  /**
-   * Process payment with Square
-   */
-  async processSquarePayment(
-    orderId: string,
-    amount: number,
-    token: string,
-    currency: string = 'USD'
-  ): Promise<Payment> {
-    return this.processPayment({
-      orderId,
-      provider: 'square',
-      amount,
-      currency,
-      token,
-      metadata: { provider: 'square' }
-    });
-  }
-
-  /**
-   * Process payment with Mercado Pago
-   */
-  async processMercadoPagoPayment(
-    orderId: string,
-    amount: number,
-    token: string,
-    currency: string = 'ARS'
-  ): Promise<Payment> {
-    return this.processPayment({
-      orderId,
-      provider: 'mercado_pago',
-      amount,
-      currency,
-      token,
-      metadata: { provider: 'mercado_pago' }
-    });
-  }
-
-  /**
-   * Process payment with PayPal
-   */
-  async processPayPalPayment(
-    orderId: string,
-    amount: number,
-    token: string,
-    currency: string = 'USD'
-  ): Promise<Payment> {
-    return this.processPayment({
-      orderId,
-      provider: 'paypal',
-      amount,
-      currency,
-      token,
-      metadata: { provider: 'paypal' }
-    });
-  }
-
-  /**
-   * Get all payments with optional filters
-   */
-  async getPayments(params?: {
-    orderId?: string;
-    status?: 'pending' | 'succeeded' | 'failed' | 'refunded';
-    provider?: PaymentProvider;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ payments: Payment[]; total: number; limit: number; offset: number }> {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as Record<string, string>).toString()
-      : '';
-    return apiClient.get<{ payments: Payment[]; total: number; limit: number; offset: number }>(
-      `/v1/payments${queryString}`
-    );
-  }
-
-  /**
-   * Check if payment succeeded
-   */
-  isPaymentSuccessful(payment: Payment): boolean {
-    return payment.status === 'succeeded';
-  }
-
-  /**
-   * Format currency
+   * Format currency (utility)
    */
   formatCurrency(amount: number, currency: string = 'USD'): string {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency
-    }).format(amount / 100);
+    }).format(amount);
   }
 
   /**

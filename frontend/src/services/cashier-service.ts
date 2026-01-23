@@ -106,6 +106,7 @@ export interface CashSession {
   expectedBalance: number;
   actualBalance?: number;
   status: 'open' | 'closed';
+  discrepancy?: number;
 }
 
 export interface CashMovement {
@@ -174,8 +175,8 @@ class CashierService {
   /**
    * Close a cash session
    */
-  async closeSession(sessionId: string, actualBalance: number): Promise<CashSession> {
-    const response = await apiClient.post<{ session: CashSession }>(`/v2/cashier/sessions/${sessionId}/close`, { actualBalance });
+  async closeSession(sessionId: string, actualBalance: number): Promise<CashSession & { discrepancy: number }> {
+    const response = await apiClient.post<{ session: CashSession & { discrepancy: number } }>(`/v2/cashier/sessions/${sessionId}/close`, { actualBalance });
     return response.session;
   }
 

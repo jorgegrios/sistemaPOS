@@ -58,9 +58,23 @@ export class CashierDomainService {
     }
 
     /**
-     * Close a cash session
+     * Close a cash session (Blind Close)
+     * RULE: System does not reveal expected balance until AFTER closure.
      */
-    async closeSession(request: CloseSessionRequest): Promise<CashSession> {
+    async closeSession(request: CloseSessionRequest): Promise<CashSession & { discrepancy: number }> {
+        // First get the current expected balance
+        const current = await this.pool.query(
+            'SELECT expected_balance FROM cash_sessions WHERE id = $1 AND status = \'open\'',
+            [request.sessionId]
+        );
+
+        if (current.rows.length === 0) {
+            throw new Error('Session not found or already closed');
+        }
+
+        const expected = parseFloat(current.rows[0].expected_balance);
+        const discrepancy = request.actualBalance - expected;
+
         const result = await this.pool.query(
             `UPDATE cash_sessions
        SET status = 'closed', closed_at = NOW(), actual_balance = $1, updated_at = NOW()
@@ -69,11 +83,11 @@ export class CashierDomainService {
             [request.actualBalance, request.sessionId]
         );
 
-        if (result.rows.length === 0) {
-            throw new Error('Session not found or already closed');
-        }
-
-        return this.mapRowToSession(result.rows[0]);
+        const session = this.mapRowToSession(result.rows[0]);
+        return {
+            ...session,
+            discrepancy
+        };
     }
 
     /**

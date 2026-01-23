@@ -11,13 +11,13 @@ import { emitEvent, DomainEventType } from '../../shared/events';
 import { canCloseOrder } from '../../shared/idempotency';
 
 export class KitchenService {
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool) { }
 
   /**
    * Get Active Kitchen Items
    * RULE: Only show items with status = 'sent' or 'prepared'
    */
-  async getActiveItems(): Promise<KitchenOrderItem[]> {
+  async getActiveItems(companyId: string): Promise<KitchenOrderItem[]> {
     // Obtener todos los items activos y filtrar por categoría en memoria
     // Esto es más confiable que filtrar en SQL con múltiples condiciones
     const result = await this.pool.query(
@@ -87,7 +87,7 @@ export class KitchenService {
       const categoryName = ((row.category_name || '') as string).toLowerCase();
 
       // Excluir categorías de bar/bebidas
-      const isBarCategory = 
+      const isBarCategory =
         categoryType === 'bar' ||
         categoryType === 'drinks' ||
         categoryName.includes('bebida') ||
@@ -112,7 +112,7 @@ export class KitchenService {
   /**
    * Get Kitchen Items by Order
    */
-  async getItemsByOrder(orderId: string): Promise<KitchenOrderItem[]> {
+  async getItemsByOrder(orderId: string, companyId: string): Promise<KitchenOrderItem[]> {
     const result = await this.pool.query(
       `SELECT 
         oi.id,
@@ -153,7 +153,7 @@ export class KitchenService {
       const categoryType = metadata.type || metadata.location || '';
       const categoryName = (row.category_name || '').toLowerCase();
 
-      const isBarCategory = 
+      const isBarCategory =
         categoryType === 'bar' ||
         categoryType === 'drinks' ||
         categoryName.includes('bebida') ||
@@ -173,9 +173,9 @@ export class KitchenService {
    * RULE: Only show orders with at least one item with status 'sent' (being prepared)
    * RULE: Exclude orders where all kitchen items are 'prepared' or 'served' (order complete)
    */
-  async getKitchenOrders(): Promise<KitchenOrder[]> {
+  async getKitchenOrders(companyId: string): Promise<KitchenOrder[]> {
     // Only get items with status 'sent' or 'prepared' (not 'served')
-    const items = await this.getActiveItems();
+    const items = await this.getActiveItems(companyId);
 
     // Group items by order and get order creation time
     const ordersMap = new Map<string, KitchenOrder>();
@@ -183,13 +183,13 @@ export class KitchenService {
     // Get order creation times for all unique orders
     const uniqueOrderIds = [...new Set(items.map(item => item.orderId))];
     const orderTimesMap = new Map<string, string>();
-    
+
     if (uniqueOrderIds.length > 0) {
       const orderTimesResult = await this.pool.query(
         `SELECT id, created_at FROM orders WHERE id = ANY($1::uuid[])`,
         [uniqueOrderIds]
       );
-      
+
       orderTimesResult.rows.forEach(row => {
         orderTimesMap.set(row.id, new Date(row.created_at).toISOString());
       });
@@ -199,7 +199,7 @@ export class KitchenService {
       if (!ordersMap.has(item.orderId)) {
         // Use order creation time (when waiter took the order), fallback to item creation time
         const orderCreatedAt = orderTimesMap.get(item.orderId) || item.createdAt;
-        
+
         ordersMap.set(item.orderId, {
           orderId: item.orderId,
           orderNumber: item.orderNumber,
@@ -227,13 +227,14 @@ export class KitchenService {
    * Mark Order Item as Prepared
    * RULE: Only mark items with status = 'sent' as 'prepared'
    */
-  async markItemPrepared(orderItemId: string): Promise<KitchenOrderItem> {
+  async markItemPrepared(orderItemId: string, companyId: string): Promise<KitchenOrderItem> {
     // Verify item exists and is in 'sent' status
     const itemResult = await this.pool.query(
       `SELECT oi.id, oi.order_id, oi.status
        FROM order_items oi
-       WHERE oi.id = $1`,
-      [orderItemId]
+       INNER JOIN orders o ON oi.order_id = o.id
+       WHERE oi.id = $1 AND o.company_id = $2`,
+      [orderItemId, companyId]
     );
 
     if (itemResult.rows.length === 0) {
@@ -253,7 +254,7 @@ export class KitchenService {
     );
 
     // Get updated item
-    const updatedItems = await this.getItemsByOrder(item.order_id);
+    const updatedItems = await this.getItemsByOrder(item.order_id, companyId);
     const updatedItem = updatedItems.find(i => i.id === orderItemId);
 
     if (!updatedItem) {
@@ -300,7 +301,7 @@ export class KitchenService {
     // Note: Bar items are handled separately in bar service
     if (totalInt > 0 && totalInt === preparedInt + servedInt) {
       console.log(`[Kitchen] All kitchen items prepared for order ${item.order_id} - marking kitchen items as served`);
-      
+
       // Mark all kitchen items as served (only kitchen items, not bar)
       // Use a subquery to identify kitchen items
       await this.pool.query(
@@ -328,7 +329,7 @@ export class KitchenService {
          )`,
         [item.order_id]
       );
-      
+
       // After marking kitchen items as served, check if all kitchen items are now served
       // If so, update order status to 'served' to indicate kitchen has finished
       // This is independent of bar items - when kitchen finishes, order status becomes 'served'
@@ -358,10 +359,10 @@ export class KitchenService {
          )`,
         [item.order_id]
       );
-      
+
       const finalTotal = parseInt(finalKitchenItemsResult.rows[0].total) || 0;
       const finalServed = parseInt(finalKitchenItemsResult.rows[0].served) || 0;
-      
+
       // If all kitchen items are now served, update order status to 'served'
       // This indicates the kitchen has finished their part, even if bar items are still pending
       if (finalTotal > 0 && finalServed === finalTotal) {
@@ -369,7 +370,7 @@ export class KitchenService {
           `SELECT status FROM orders WHERE id = $1`,
           [item.order_id]
         );
-        
+
         // Only update if order is still in 'sent_to_kitchen' status
         if (currentOrderStatus.rows[0]?.status === 'sent_to_kitchen') {
           await this.pool.query(
@@ -377,14 +378,14 @@ export class KitchenService {
             [item.order_id]
           );
           console.log(`[Kitchen] All kitchen items served for order ${item.order_id} - order status updated to 'served'`);
-          
+
           // Emit ORDER_SERVED event to notify waiter that kitchen has finished
           emitEvent(DomainEventType.ORDER_SERVED, {
             orderId: item.order_id,
           } as any);
         }
       }
-      
+
       // Emit events
       emitEvent(DomainEventType.ALL_ITEMS_PREPARED, {
         orderId: item.order_id,
@@ -399,7 +400,7 @@ export class KitchenService {
    * Get Served Orders (orders with all items served)
    * RULE: Only show orders where all kitchen items have status = 'served'
    */
-  async getServedOrders(): Promise<KitchenOrder[]> {
+  async getServedOrders(companyId: string): Promise<KitchenOrder[]> {
     // Get ALL orders that have at least one item with status 'served' or 'prepared'
     // We'll check each one to see if ALL kitchen items are served/prepared
     const allOrdersResult = await this.pool.query(
@@ -413,12 +414,12 @@ export class KitchenService {
     );
 
     console.log('[Kitchen] Checking', allOrdersResult.rows.length, 'orders for served status (have items with served/prepared status)');
-    
+
     if (allOrdersResult.rows.length === 0) {
       console.log('[Kitchen] No orders found with served/prepared items');
       return [];
     }
-    
+
     const ordersWithServedItemsResult = allOrdersResult;
 
     // Now, for each order, get all its kitchen items (only those with status 'served')
@@ -475,7 +476,7 @@ export class KitchenService {
         const categoryName = ((row.category_name || '') as string).toLowerCase();
 
         // Check if it's a bar category
-        const isBarCategory = 
+        const isBarCategory =
           categoryType === 'bar' ||
           categoryType === 'drinks' ||
           categoryName.includes('bebida') ||
@@ -504,26 +505,26 @@ export class KitchenService {
       const servedCount = kitchenItems.filter(item => item.status === 'served').length;
       const preparedCount = kitchenItems.filter(item => item.status === 'prepared').length;
       const sentCount = kitchenItems.filter(item => item.status === 'sent').length;
-      
+
       // Check if ALL kitchen items are served OR (prepared + served)
       // If all items are prepared, they should be marked as served automatically
       // But we'll include them in served orders if all are prepared/served
-      const allKitchenItemsServed = kitchenItems.length > 0 && 
+      const allKitchenItemsServed = kitchenItems.length > 0 &&
         (kitchenItems.every(item => item.status === 'served') ||
-         (servedCount + preparedCount === kitchenItems.length && sentCount === 0));
-      
+          (servedCount + preparedCount === kitchenItems.length && sentCount === 0));
+
       console.log(`[Kitchen] Order ${orderId}: ${servedCount} served, ${preparedCount} prepared, ${sentCount} sent out of ${kitchenItems.length} kitchen items. All served: ${allKitchenItemsServed}`);
 
       if (allKitchenItemsServed) {
         console.log(`[Kitchen] Order ${orderId} - ALL kitchen items are served/prepared, including in served orders list`);
-        
+
         // If all items are prepared but not yet served, mark them as served first
         // Capture the timestamp when marking as served
         let servedAtTimestamp: Date | null = null;
         if (preparedCount > 0 && servedCount < kitchenItems.length) {
           console.log(`[Kitchen] Order ${orderId} - Marking ${preparedCount} prepared items as served`);
           servedAtTimestamp = new Date(); // Capture current timestamp when marking as served
-          
+
           await this.pool.query(
             `UPDATE order_items oi
              SET status = 'served'
@@ -550,7 +551,7 @@ export class KitchenService {
             [orderId]
           );
         }
-        
+
         // Get full details of served items for this order (now all should be 'served')
         const servedItemsResult = await this.pool.query(
           `SELECT 
@@ -615,7 +616,7 @@ export class KitchenService {
           const categoryType = (metadata?.type || metadata?.location || '') as string;
           const categoryName = ((row.category_name || '') as string).toLowerCase();
 
-          const isBarCategory = 
+          const isBarCategory =
             categoryType === 'bar' ||
             categoryType === 'drinks' ||
             categoryName.includes('bebida') ||
@@ -629,12 +630,12 @@ export class KitchenService {
 
         if (servedKitchenItems.length > 0) {
           const items = servedKitchenItems.map(row => this.mapRowToKitchenOrderItem(row));
-          
+
           // Get order creation time (when waiter took the order)
           const orderCreatedAt = servedKitchenItems[0]?.order_created_at
             ? new Date(servedKitchenItems[0].order_created_at).toISOString()
             : items[0].createdAt;
-          
+
           // Get served_at timestamp:
           // 1. If we just marked items as served, use the captured timestamp
           // 2. Otherwise, get the maximum created_at from items that are already served
@@ -651,7 +652,7 @@ export class KitchenService {
             );
             servedAt = new Date(maxItemCreatedAt).toISOString();
           }
-          
+
           console.log(`[Kitchen] Adding order ${orderId} (${items[0].tableNumber}) to served orders with ${items.length} items. Created: ${orderCreatedAt}, Served: ${servedAt}`);
           allServedOrders.push({
             orderId,

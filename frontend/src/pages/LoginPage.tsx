@@ -15,6 +15,7 @@ export const LoginPage: React.FC = () => {
 
   const [email, setEmail] = useState('mesero1@restaurant.com');
   const [password, setPassword] = useState('mesero123');
+  const [companySlug, setCompanySlug] = useState('default');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,8 +25,8 @@ export const LoginPage: React.FC = () => {
     setError(null);
 
     try {
-      await login(email, password);
-      navigate('/');
+      await login(email, password, companySlug);
+      navigate('/app');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : t('login.error');
       setError(errorMsg);
@@ -66,6 +67,22 @@ export const LoginPage: React.FC = () => {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Company Slug Field */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Company ID (Slug)
+              </label>
+              <input
+                type="text"
+                value={companySlug}
+                onChange={(e) => setCompanySlug(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+                placeholder="default"
+                required
+                disabled={loading}
+              />
+            </div>
+
             {/* Email Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -117,7 +134,7 @@ export const LoginPage: React.FC = () => {
 
           {/* Test Credentials Info */}
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-            <p className="text-sm text-gray-700 font-semibold mb-2">Credenciales de Prueba:</p>
+            <p className="text-sm text-gray-700 font-semibold mb-2">Credenciales de Prueba (Company: default):</p>
             <div className="text-xs text-gray-600 space-y-1">
               <p><strong>Mesero:</strong> mesero1@restaurant.com / mesero123</p>
               <p><strong>Cajero:</strong> cajero@restaurant.com / cajero123</p>

@@ -76,6 +76,18 @@ export const StripeCardForm: React.FC<StripeCardFormProps> = ({
     }
   };
 
+  if (!stripe || !elements) {
+    return (
+      <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
+        <p className="text-yellow-800 font-medium mb-2">Pago con tarjeta no disponible</p>
+        <p className="text-yellow-700 text-sm">
+          Este restaurante no tiene configurada una pasarela de pagos.
+          Por favor use otro método de pago.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="bg-white p-4 rounded-lg border border-gray-200">
@@ -99,7 +111,7 @@ export const StripeCardForm: React.FC<StripeCardFormProps> = ({
 
       <button
         type="submit"
-        disabled={!stripe || isProcessing}
+        disabled={isProcessing}
         className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isProcessing ? (

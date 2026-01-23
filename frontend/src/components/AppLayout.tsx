@@ -117,11 +117,11 @@ export const AppLayout: React.FC = () => {
       <div className="flex h-screen bg-gray-50">
         {/* Sidebar para Dashboard */}
         <aside
-          className={`fixed md:relative z-40 w-64 h-screen bg-white shadow-lg transform transition-transform duration-200 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+          className={`fixed md:relative z-40 w-64 h-screen bg-white shadow-lg transform transition-transform duration-200 flex flex-col ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
             }`}
         >
           {/* Logo */}
-          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
             <div>
               <h1 className="text-2xl font-bold text-blue-600">POS</h1>
               <p className="text-xs text-gray-500 mt-1">Point of Sale</p>
@@ -135,7 +135,7 @@ export const AppLayout: React.FC = () => {
           </div>
 
           {/* Navigation */}
-          <nav className="p-4 space-y-2">
+          <nav className="flex-1 overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-gray-200 hover:scrollbar-thumb-blue-200">
             {navItems.map((item) => (
               <button
                 key={item.path}
@@ -153,7 +153,7 @@ export const AppLayout: React.FC = () => {
           </nav>
 
           {/* User Info with Date and Time */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-gray-50">
+          <div className="flex-shrink-0 p-4 border-t border-gray-200 bg-gray-50">
             {/* Date and Time */}
             <div className="mb-3 p-3 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg border-2 border-blue-200">
               <div className="text-center">
@@ -177,9 +177,21 @@ export const AppLayout: React.FC = () => {
 
             {/* User Info */}
             <div className="mb-3">
-              <p className="text-xs text-gray-500">Logged in as</p>
-              <p className="font-semibold text-gray-800">{user?.name}</p>
-              <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+              <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">My Account</p>
+              <button
+                onClick={() => navigate('/profile')}
+                className="w-full text-left p-3 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-blue-400 hover:shadow-md transition mb-3 group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center group-hover:bg-blue-600 transition">
+                    <span className="text-xl group-hover:scale-110 transition">👤</span>
+                  </div>
+                  <div className="truncate">
+                    <p className="font-bold text-gray-800 text-sm truncate">{user?.name}</p>
+                    <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                  </div>
+                </div>
+              </button>
             </div>
             <button
               onClick={handleLogout}

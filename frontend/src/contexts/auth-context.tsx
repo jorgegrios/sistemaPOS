@@ -10,7 +10,7 @@ export interface AuthContextType {
   user: User | null;
   loading: boolean;
   error: string | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, companySlug: string) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
 }
@@ -44,10 +44,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     verifyAuth();
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, companySlug: string) => {
     try {
       setError(null);
-      const response = await authService.login({ email, password });
+      const response = await authService.login({ email, password, companySlug });
       setUser(response.user);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Login failed';

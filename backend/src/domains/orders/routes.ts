@@ -19,12 +19,13 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { tableId } = req.body;
     const waiterId = req.user?.id;
+    const companyId = req.user?.companyId;
 
-    if (!tableId || !waiterId) {
-      return res.status(400).json({ error: 'tableId and waiterId are required' });
+    if (!tableId || !waiterId || !companyId) {
+      return res.status(400).json({ error: 'tableId, waiterId and companyId are required' });
     }
 
-    const order = await ordersService.createOrder({ tableId, waiterId });
+    const order = await ordersService.createOrder({ tableId, waiterId, companyId });
     return res.status(201).json(order);
   } catch (error: any) {
     console.error('[Orders] Error creating order:', error);
@@ -39,7 +40,11 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
 router.get('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const order = await ordersService.getOrderWithItems(id);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const order = await ordersService.getOrderWithItems(id, companyId);
     return res.json(order);
   } catch (error: any) {
     if (error.message.includes('not found')) {
@@ -58,12 +63,16 @@ router.post('/:id/items', verifyToken, async (req: AuthRequest, res: Response) =
   try {
     const { id } = req.params;
     const { items } = req.body;
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'items array is required' });
     }
 
-    const orderItems = await ordersService.addItemsToOrder(id, { items });
+    console.log(`[Orders] Adding items to order ${id} for company ${companyId}`);
+    const orderItems = await ordersService.addItemsToOrder(id, companyId, { items });
     return res.status(201).json({ items: orderItems });
   } catch (error: any) {
     console.error('[Orders] Error adding items:', error);
@@ -79,7 +88,11 @@ router.post('/:id/items', verifyToken, async (req: AuthRequest, res: Response) =
 router.delete('/:id/items', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    await ordersService.removeAllItemsFromOrder(id);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    await ordersService.removeAllItemsFromOrder(id, companyId);
     return res.status(200).json({ message: 'All items removed from order' });
   } catch (error: any) {
     console.error('[Orders] Error removing items:', error);
@@ -94,7 +107,11 @@ router.delete('/:id/items', verifyToken, async (req: AuthRequest, res: Response)
 router.delete('/:id/items/:itemId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id, itemId } = req.params;
-    await ordersService.cancelOrderItem(id, itemId);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    await ordersService.cancelOrderItem(id, itemId, companyId);
     return res.status(200).json({ message: 'Item cancelled successfully' });
   } catch (error: any) {
     console.error('[Orders] Error cancelling item:', error);
@@ -109,7 +126,11 @@ router.delete('/:id/items/:itemId', verifyToken, async (req: AuthRequest, res: R
 router.post('/:id/send-to-kitchen', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const order = await ordersService.sendToKitchen(id);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const order = await ordersService.sendToKitchen(id, companyId);
     return res.json(order);
   } catch (error: any) {
     console.error('[Orders] Error sending to kitchen:', error);
@@ -124,7 +145,11 @@ router.post('/:id/send-to-kitchen', verifyToken, async (req: AuthRequest, res: R
 router.post('/:id/serve', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const order = await ordersService.markAsServed(id);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const order = await ordersService.markAsServed(id, companyId);
     return res.json(order);
   } catch (error: any) {
     console.error('[Orders] Error marking as served:', error);
@@ -139,7 +164,11 @@ router.post('/:id/serve', verifyToken, async (req: AuthRequest, res: Response) =
 router.post('/:id/close', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const order = await ordersService.closeOrder(id);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const order = await ordersService.closeOrder(id, companyId);
     return res.json(order);
   } catch (error: any) {
     console.error('[Orders] Error closing order:', error);
@@ -154,7 +183,11 @@ router.post('/:id/close', verifyToken, async (req: AuthRequest, res: Response) =
 router.post('/:id/cancel', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const order = await ordersService.cancelOrder(id);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const order = await ordersService.cancelOrder(id, companyId);
     return res.json(order);
   } catch (error: any) {
     console.error('[Orders] Error cancelling order:', error);

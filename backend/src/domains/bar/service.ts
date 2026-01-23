@@ -10,7 +10,7 @@ import { BarOrderItem, BarOrder } from './types';
 import { emitEvent, DomainEventType } from '../../shared/events';
 
 export class BarService {
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool) { }
 
   /**
    * Get Active Bar Items
@@ -18,7 +18,7 @@ export class BarService {
    * Bar categories: metadata.type = 'bar' or 'drinks'
    * Items disappear when marked as 'prepared'
    */
-  async getActiveItems(): Promise<BarOrderItem[]> {
+  async getActiveItems(companyId: string): Promise<BarOrderItem[]> {
     const result = await this.pool.query(
       `SELECT 
         oi.id,
@@ -57,7 +57,7 @@ export class BarService {
   /**
    * Get Bar Items by Order
    */
-  async getItemsByOrder(orderId: string): Promise<BarOrderItem[]> {
+  async getItemsByOrder(orderId: string, companyId: string): Promise<BarOrderItem[]> {
     const result = await this.pool.query(
       `SELECT 
         oi.id,
@@ -96,8 +96,8 @@ export class BarService {
   /**
    * Get Bar Orders (grouped by order)
    */
-  async getBarOrders(): Promise<BarOrder[]> {
-    const items = await this.getActiveItems();
+  async getBarOrders(companyId: string): Promise<BarOrder[]> {
+    const items = await this.getActiveItems(companyId);
 
     // Group items by order
     const ordersMap = new Map<string, BarOrder>();
@@ -123,13 +123,14 @@ export class BarService {
    * Mark Order Item as Prepared
    * RULE: Only mark items with status = 'sent' as 'prepared'
    */
-  async markItemPrepared(orderItemId: string): Promise<BarOrderItem> {
+  async markItemPrepared(orderItemId: string, companyId: string): Promise<BarOrderItem> {
     // Verify item exists and is in 'sent' status
     const itemResult = await this.pool.query(
       `SELECT oi.id, oi.order_id, oi.status
        FROM order_items oi
-       WHERE oi.id = $1`,
-      [orderItemId]
+       INNER JOIN orders o ON oi.order_id = o.id
+       WHERE oi.id = $1 AND o.company_id = $2`,
+      [orderItemId, companyId]
     );
 
     if (itemResult.rows.length === 0) {
@@ -149,7 +150,7 @@ export class BarService {
     );
 
     // Get updated item
-    const updatedItems = await this.getItemsByOrder(item.order_id);
+    const updatedItems = await this.getItemsByOrder(item.order_id, companyId);
     const updatedItem = updatedItems.find(i => i.id === orderItemId);
 
     if (!updatedItem) {
@@ -192,7 +193,7 @@ export class BarService {
    * Get Served Bar Orders
    * RULE: Only show orders with all bar items prepared or served
    */
-  async getServedOrders(): Promise<BarOrder[]> {
+  async getServedOrders(companyId: string): Promise<BarOrder[]> {
     // Get all orders that have at least one bar item with status 'prepared' or 'served'
     const allOrdersResult = await this.pool.query(
       `SELECT DISTINCT o.id as order_id, o.order_number, o.status as order_status, o.created_at, o.paid_at
@@ -210,8 +211,9 @@ export class BarService {
          OR LOWER(mc.name) LIKE '%bar%'
          OR LOWER(mc.name) LIKE '%cocktail%'
        )
+       AND o.company_id = $1
        ORDER BY o.created_at DESC`,
-      []
+      [companyId]
     );
 
     console.log('[Bar] Checking', allOrdersResult.rows.length, 'orders for served bar items');
@@ -263,12 +265,12 @@ export class BarService {
 
       if (barItemsResult.rows.length > 0) {
         const items = barItemsResult.rows.map(row => this.mapRowToBarOrderItem(row));
-        
+
         // Get served_at from the first row (it's the same for all items in the order)
-        const servedAt = barItemsResult.rows[0]?.served_at 
+        const servedAt = barItemsResult.rows[0]?.served_at
           ? new Date(barItemsResult.rows[0].served_at).toISOString()
           : (orderRow.paid_at ? new Date(orderRow.paid_at).toISOString() : undefined);
-        
+
         allServedOrders.push({
           orderId: orderRow.order_id,
           orderNumber: orderRow.order_number,

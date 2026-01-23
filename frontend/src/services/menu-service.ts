@@ -60,7 +60,7 @@ class MenuService {
    * Get all menus for a restaurant
    */
   async getMenus(restaurantId: string): Promise<Menu[]> {
-    return apiClient.get<Menu[]>(`/v1/menus/${restaurantId}`, { skipAuth: true });
+    return apiClient.get<Menu[]>(`/v1/menus/${restaurantId}`);
   }
 
   /**
@@ -68,8 +68,7 @@ class MenuService {
    */
   async getMenuDetail(restaurantId: string, menuId: string): Promise<MenuDetail> {
     return apiClient.get<MenuDetail>(
-      `/v1/menus/${restaurantId}/${menuId}`,
-      { skipAuth: true }
+      `/v1/menus/${restaurantId}/${menuId}`
     );
   }
 

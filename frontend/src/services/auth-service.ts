@@ -11,11 +11,13 @@ export interface User {
   name: string;
   role: 'admin' | 'manager' | 'waiter' | 'cashier' | 'kitchen' | 'bartender';
   restaurantId: string;
+  companyId: string;
 }
 
 export interface LoginRequest {
   email: string;
   password: string;
+  companySlug?: string;
 }
 
 export interface LoginResponse {
@@ -102,6 +104,16 @@ class AuthService {
    */
   getToken(): string | null {
     return apiClient.getToken();
+  }
+
+  /**
+   * Change user password
+   */
+  async changePassword(userId: string, currentPassword?: string, newPassword?: string): Promise<{ ok: boolean; message: string }> {
+    return await apiClient.put<{ ok: boolean; message: string }>(
+      `/v1/auth/users/${userId}/password`,
+      { currentPassword, newPassword }
+    );
   }
 
   /**

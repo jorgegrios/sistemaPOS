@@ -45,15 +45,7 @@ export const StripeProviderWrapper: React.FC<StripeProviderWrapperProps> = ({ ch
     loadStripeConfig();
   }, []);
 
-  // If Stripe is not configured, render children without Stripe Elements
-  if (loading) {
-    return <>{children}</>;
-  }
-
-  if (!stripeKey || !stripePromise) {
-    return <>{children}</>;
-  }
-
+  // Always render Elements provider to prevent hook crashes in children
   return (
     <Elements stripe={stripePromise} options={{ locale: 'en' }}>
       {children}

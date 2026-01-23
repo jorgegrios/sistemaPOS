@@ -1,0 +1,60 @@
+
+> sistema-pos-backend@0.1.0 migrate
+> node-pg-migrate up
+
+> Migrating files:
+> - 1705000001000_finalize-saas-isolation
+### MIGRATION 1705000001000_finalize-saas-isolation (UP) ###
+ALTER TABLE "menu_categories"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX "menu_categories_company_id_index" ON "menu_categories" ("company_id");
+ALTER TABLE "menu_items"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX "menu_items_company_id_index" ON "menu_items" ("company_id");
+ALTER TABLE "modifiers"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX "modifiers_company_id_index" ON "modifiers" ("company_id");
+ALTER TABLE "ingredients"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX "ingredients_company_id_index" ON "ingredients" ("company_id");
+ALTER TABLE "product_modifiers"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX "product_modifiers_company_id_index" ON "product_modifiers" ("company_id");
+ALTER TABLE "order_items"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX "order_items_company_id_index" ON "order_items" ("company_id");
+ALTER TABLE "inventory_movements"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX "inventory_movements_company_id_index" ON "inventory_movements" ("company_id");
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('1705000001000_finalize-saas-isolation', NOW());
+
+
+Error executing:
+ALTER TABLE "ingredients"
+  ADD "company_id" uuid REFERENCES companies(id) ON DELETE CASCADE;
+error: relation "ingredients" does not exist
+
+> Rolling back attempted migration ...
+error: relation "ingredients" does not exist
+    at C:\proyectos\posRestaurante\sistemaPOS\backend\node_modules\pg\lib\client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async Object.query (file:///C:/proyectos/posRestaurante/sistemaPOS/backend/node_modules/node-pg-migrate/dist/bundle/index.js:3499:14)
+    at async runner (file:///C:/proyectos/posRestaurante/sistemaPOS/backend/node_modules/node-pg-migrate/dist/bundle/index.js:3806:9) {
+  length: 109,
+  severity: 'ERROR',
+  code: '42P01',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'namespace.c',
+  line: '433',
+  routine: 'RangeVarGetRelidExtended'
+}

@@ -9,6 +9,7 @@ export interface Order {
   id: string;
   tableId: string;
   waiterId: string;
+  companyId: string;
   status: OrderStatus;
   subtotal: number;
   tax: number;
@@ -31,6 +32,7 @@ export interface OrderItem {
 export interface CreateOrderRequest {
   tableId: string;
   waiterId: string;
+  companyId: string;
 }
 
 export interface AddItemsRequest {

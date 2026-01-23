@@ -23,6 +23,9 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'name, categoryId, and basePrice are required' });
     }
 
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     const product = await productsService.createProduct({
       name,
       categoryId,
@@ -30,7 +33,7 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       description,
       imageUrl,
       active,
-    });
+    }, companyId);
 
     return res.status(201).json(product);
   } catch (error: any) {
@@ -48,11 +51,14 @@ router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
     const categoryId = req.query.categoryId as string;
     const activeOnly = req.query.activeOnly !== 'false';
 
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (categoryId) {
-      const products = await productsService.getProductsByCategory(categoryId, activeOnly);
+      const products = await productsService.getProductsByCategory(categoryId, companyId, activeOnly);
       return res.json({ products });
     } else {
-      const products = await productsService.getActiveProducts();
+      const products = await productsService.getActiveProducts(companyId);
       return res.json({ products });
     }
   } catch (error: any) {
@@ -70,11 +76,14 @@ router.get('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const withModifiers = req.query.withModifiers === 'true';
 
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (withModifiers) {
-      const product = await productsService.getProductWithModifiers(id);
+      const product = await productsService.getProductWithModifiers(id, companyId);
       return res.json(product);
     } else {
-      const product = await productsService.getProduct(id);
+      const product = await productsService.getProduct(id, companyId);
       return res.json(product);
     }
   } catch (error: any) {
@@ -95,7 +104,10 @@ router.put('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { name, categoryId, basePrice, description, imageUrl, active } = req.body;
 
-    const product = await productsService.updateProduct(id, {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const product = await productsService.updateProduct(id, companyId, {
       name,
       categoryId,
       basePrice,
@@ -121,7 +133,10 @@ router.put('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
 router.delete('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    await productsService.deleteProduct(id);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    await productsService.deleteProduct(id, companyId);
     return res.status(204).send();
   } catch (error: any) {
     console.error('[Products] Error deleting product:', error);
@@ -136,7 +151,10 @@ router.delete('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
 router.post('/:id/modifiers/:modifierId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id, modifierId } = req.params;
-    await productsService.addModifierToProduct(id, modifierId);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    await productsService.addModifierToProduct(id, modifierId, companyId);
     return res.status(204).send();
   } catch (error: any) {
     console.error('[Products] Error adding modifier:', error);
@@ -151,7 +169,10 @@ router.post('/:id/modifiers/:modifierId', verifyToken, async (req: AuthRequest, 
 router.delete('/:id/modifiers/:modifierId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id, modifierId } = req.params;
-    await productsService.removeModifierFromProduct(id, modifierId);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    await productsService.removeModifierFromProduct(id, modifierId, companyId);
     return res.status(204).send();
   } catch (error: any) {
     console.error('[Products] Error removing modifier:', error);

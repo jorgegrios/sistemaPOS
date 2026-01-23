@@ -6,179 +6,30 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderService, Order, OrderItem } from '../services/order-service';
-import { paymentService, PaymentProvider } from '../services/payment-service';
+import { paymentService } from '../services/payment-service';
 import { toast } from 'sonner';
 import { StripeCardForm } from '../components/StripeCardForm';
+import { CheckoutButton } from '../components/CheckoutButton';
+import { QRPaymentModal } from '../components/QRPaymentModal';
 
 export const ProcessPaymentPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // -- HOOKS MUST BE AT THE TOP --
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Payment form state
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash' | 'qr' | 'wallet'>('card');
-  const [provider, setProvider] = useState<PaymentProvider>('stripe');
   const [paymentToken, setPaymentToken] = useState<string>('');
   const [tip, setTip] = useState<number>(0);
   const [customTip, setCustomTip] = useState<string>('');
 
-  useEffect(() => {
-    const loadOrder = async () => {
-      if (!id) {
-        setError('Order ID is required');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        const orderData = await orderService.getOrder(id);
-        setOrder(orderData);
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'Failed to load order';
-        setError(errorMsg);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadOrder();
-  }, [id]);
-
-  const handleTipChange = (value: string) => {
-    setCustomTip(value);
-    const tipAmount = parseFloat(value) || 0;
-    setTip(tipAmount);
-  };
-
-  const handleQuickTip = (percentage: number) => {
-    if (!order) return;
-    const tipAmount = (order.total * percentage) / 100;
-    setTip(tipAmount);
-    setCustomTip(tipAmount.toFixed(2));
-  };
-
-  const handleProcessPayment = async () => {
-    if (!order || !id) return;
-
-    // Validate payment method
-    if (paymentMethod === 'card' && !paymentToken) {
-      setError('Payment token is required for card payments');
-      return;
-    }
-
-    // Validate split selection
-    if (splitMode === 'seat' && selectedSeat === null) {
-      setError('Please select a seat to pay for');
-      return;
-    }
-
-    try {
-      setProcessing(true);
-      setError(null);
-
-      // Generate idempotency key
-      const idempotencyKey = `${id}-${Date.now()}`;
-
-      // Calculate amount based on split mode
-      let amountToPay = order.total;
-      let itemsToPay: string[] = [];
-
-      if (splitMode === 'seat' && selectedSeat !== null) {
-        const seatItems = order.items?.filter(item => (item.seatNumber || 1) === selectedSeat) || [];
-        if (seatItems.length === 0) {
-          throw new Error(`No items found for Seat ${selectedSeat}`);
-        }
-
-        // Calculate subtotal for seat
-        const seatSubtotal = seatItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-
-        // Proportional tax and discount
-        const ratio = seatSubtotal / order.subtotal;
-        const seatTax = order.tax * ratio;
-        const seatDiscount = order.discount * ratio;
-
-        amountToPay = seatSubtotal + seatTax - seatDiscount;
-        itemsToPay = seatItems.map(i => i.id);
-      }
-
-      // Prepare payment data
-      const paymentData = {
-        orderId: id,
-        amount: Math.round(amountToPay * 100), // Convert to cents
-        currency: 'USD',
-        method: paymentMethod,
-        provider: provider,
-        paymentMethodId: paymentToken || `cash-${idempotencyKey}`,
-        idempotencyKey,
-        tip: Math.round(tip * 100), // Convert to cents
-        metadata: {
-          orderNumber: order.orderNumber,
-          tip: tip,
-          paymentMethod: paymentMethod,
-          paymentType: splitMode === 'seat' ? 'split_check' : 'full_order',
-          seatNumber: splitMode === 'seat' ? selectedSeat : undefined,
-          paidItems: splitMode === 'seat' ? itemsToPay : undefined
-        }
-      };
-
-      // Process payment
-      const response = await paymentService.processPayment(paymentData);
-
-      if (response.status === 'succeeded') {
-        toast.success('Payment processed successfully!');
-        // Reload order to get updated payment status
-        const updatedOrder = await orderService.getOrder(id);
-        setOrder(updatedOrder);
-        // Navigate back to order detail after 2 seconds
-        setTimeout(() => {
-          navigate(`/orders/${id}`);
-        }, 2000);
-      } else {
-        setError(`Payment ${response.status}. Please try again.`);
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to process payment';
-      setError(errorMsg);
-      toast.error(errorMsg);
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="text-center py-12">
-          <p className="text-gray-500 text-lg">Loading order...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error && !order) {
-    return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <p className="text-red-700 text-lg font-semibold mb-2">Error</p>
-          <p className="text-red-600">{error}</p>
-          <button
-            onClick={() => navigate('/orders')}
-            className="mt-4 bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-medium"
-          >
-            Back to Orders
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!order) {
-    return null;
-  }
+  // QR Modal state
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [pendingPaymentId, setPendingPaymentId] = useState<string | null>(null);
 
   // Split check state
   const [splitMode, setSplitMode] = useState<'none' | 'seat'>('none');
@@ -212,7 +63,7 @@ export const ProcessPaymentPage: React.FC = () => {
     ? Array.from(new Set(order.items.map(item => item.seatNumber || 1))).sort((a, b) => a - b)
     : [];
 
-  const getFilteredItems = (): OrderItem[] => { // Use OrderItem from local import or define custom
+  const getFilteredItems = (): OrderItem[] => {
     if (!order || !order.items) return [];
     if (splitMode === 'none') return order.items;
     if (selectedSeat === null) return [];
@@ -222,34 +73,140 @@ export const ProcessPaymentPage: React.FC = () => {
   const getSubtotal = () => {
     const items = getFilteredItems();
     return items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  }
+  };
 
   const getTax = () => {
-    // Simplified tax calculation (assuming proportional tax)
     if (!order) return 0;
     if (splitMode === 'none') return order.tax;
     const sub = getSubtotal();
-    const ratio = sub / order.subtotal;
+    const ratio = order.subtotal > 0 ? sub / order.subtotal : 0;
     return order.tax * ratio;
-  }
+  };
 
   const getDiscount = () => {
-    // Simplified discount calculation (assuming proportional discount)
     if (!order) return 0;
     if (splitMode === 'none') return order.discount;
     const sub = getSubtotal();
-    const ratio = sub / order.subtotal;
+    const ratio = order.subtotal > 0 ? sub / order.subtotal : 0;
     return order.discount * ratio;
-  }
+  };
 
   const getComputedTotal = () => {
     if (!order) return 0;
     if (splitMode === 'none') return order.total;
     return getSubtotal() + getTax() - getDiscount();
-  }
+  };
 
   const activeTotal = getComputedTotal();
   const totalWithTip = activeTotal + tip;
+
+  const handleTipChange = (value: string) => {
+    setCustomTip(value);
+    const tipAmount = parseFloat(value) || 0;
+    setTip(tipAmount);
+  };
+
+  const handleQuickTip = (percentage: number) => {
+    if (!order) return;
+    const tipAmount = (order.total * percentage) / 100;
+    setTip(tipAmount);
+    setCustomTip(tipAmount.toFixed(2));
+  };
+
+  const handleProcessPayment = async () => {
+    if (!order || !id) return;
+
+    if (paymentMethod === 'card' && !paymentToken) {
+      setError('Payment token is required for card payments');
+      return;
+    }
+
+    if (splitMode === 'seat' && selectedSeat === null) {
+      setError('Please select a seat to pay for');
+      return;
+    }
+
+    try {
+      setError(null);
+
+      const subtotal = getSubtotal();
+      const tax = getTax();
+      const discount = getDiscount();
+      const amountToPay = getComputedTotal();
+
+      const paymentData = {
+        orderId: id,
+        amount: amountToPay + tip,
+        currency: 'USD',
+        method: paymentMethod as any,
+        subtotalAmount: subtotal - discount,
+        taxAmount: tax,
+        serviceCharge: 0,
+        tipAmount: tip,
+        paymentToken: paymentToken || undefined,
+      };
+
+      const response = await paymentService.processPayment(paymentData);
+
+      if (paymentMethod === 'qr') {
+        setPendingPaymentId(response.id);
+        setShowQRModal(true);
+        return;
+      }
+
+      if (response.status === 'completed') {
+        toast.success('Pago procesado exitosamente!');
+
+        if (response.print_data) {
+          console.log('[Payment] Print Data Ready:', response.print_data);
+        }
+
+        const updatedOrder = await orderService.getOrder(id);
+        setOrder(updatedOrder);
+
+        setTimeout(() => {
+          navigate(`/orders/${id}`);
+        }, 2000);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Error al procesar el pago';
+      setError(errorMsg);
+      toast.error(errorMsg);
+      throw err;
+    }
+  };
+
+  // -- CONDITIONAL RENDERING AFTER HOOKS --
+  if (loading) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto">
+        <div className="text-center py-12">
+          <p className="text-gray-500 text-lg">Loading order...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !order) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <p className="text-red-700 text-lg font-semibold mb-2">Error</p>
+          <p className="text-red-600">{error}</p>
+          <button
+            onClick={() => navigate('/orders')}
+            className="mt-4 bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-medium"
+          >
+            Back to Orders
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!order) {
+    return null;
+  }
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
@@ -355,24 +312,24 @@ export const ProcessPaymentPage: React.FC = () => {
             <div className="space-y-2">
               <div className="flex justify-between text-gray-600">
                 <span>Subtotal</span>
-                <span>${order.subtotal.toFixed(2)}</span>
+                <span>${getSubtotal().toFixed(2)}</span>
               </div>
-              {order.tax > 0 && (
+              {getTax() > 0 && (
                 <div className="flex justify-between text-gray-600">
                   <span>Tax</span>
-                  <span>${order.tax.toFixed(2)}</span>
+                  <span>${getTax().toFixed(2)}</span>
                 </div>
               )}
-              {order.discount > 0 && (
+              {getDiscount() > 0 && (
                 <div className="flex justify-between text-red-600">
                   <span>Discount</span>
-                  <span>-${order.discount.toFixed(2)}</span>
+                  <span>-${getDiscount().toFixed(2)}</span>
                 </div>
               )}
               <div className="border-t border-gray-200 pt-2 mt-2">
                 <div className="flex justify-between text-lg font-semibold text-gray-800">
                   <span>Total</span>
-                  <span>${order.total.toFixed(2)}</span>
+                  <span>${activeTotal.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -402,36 +359,18 @@ export const ProcessPaymentPage: React.FC = () => {
               ))}
             </div>
 
-            {/* Provider Selection (for card payments) */}
+            {/* Stripe Card Form (fallback for development) */}
             {paymentMethod === 'card' && (
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Payment Provider
-                </label>
-                <select
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value as PaymentProvider)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="stripe">Stripe</option>
-                  <option value="square">Square</option>
-                  <option value="mercado_pago">Mercado Pago</option>
-                </select>
-              </div>
-            )}
-
-            {/* Stripe Card Form (for Stripe card payments) */}
-            {paymentMethod === 'card' && provider === 'stripe' && (
-              <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-4">
-                  Card Information
+                  Información de Tarjeta
                 </label>
                 <StripeCardForm
-                  amount={order.total}
+                  amount={activeTotal}
                   currency="usd"
                   onPaymentMethodReady={(paymentMethodId) => {
                     setPaymentToken(paymentMethodId);
-                    toast.success('Card information validated');
+                    toast.success('Información de tarjeta validada');
                   }}
                   onError={(error) => {
                     setError(error);
@@ -441,39 +380,11 @@ export const ProcessPaymentPage: React.FC = () => {
               </div>
             )}
 
-            {/* Payment Token Input (for non-Stripe card payments or fallback) */}
-            {paymentMethod === 'card' && provider !== 'stripe' && (
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Payment Token / Card ID
-                </label>
-                <input
-                  type="text"
-                  value={paymentToken}
-                  onChange={(e) => setPaymentToken(e.target.value)}
-                  placeholder="Payment token or card ID"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter payment token from your payment provider
-                </p>
-              </div>
-            )}
-
-            {/* Cash Payment Note */}
-            {paymentMethod === 'cash' && (
-              <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-yellow-800 text-sm">
-                  💵 Cash payment will be recorded but not processed through a payment gateway.
-                </p>
-              </div>
-            )}
-
             {/* QR Code Note */}
             {paymentMethod === 'qr' && (
               <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-blue-800 text-sm">
-                  📱 QR code payment will generate a QR for the customer to scan.
+                  📱 El código QR se generará para que el cliente lo escanee.
                 </p>
               </div>
             )}
@@ -487,14 +398,14 @@ export const ProcessPaymentPage: React.FC = () => {
                 <button
                   key={percentage}
                   onClick={() => handleQuickTip(percentage)}
-                  className={`p-4 sm:p-3 rounded-lg border-2 transition duration-200 active:scale-95 ${tip > 0 && Math.abs((tip / order.total) * 100 - percentage) < 0.01
+                  className={`p-4 sm:p-3 rounded-lg border-2 transition duration-200 active:scale-95 ${tip > 0 && Math.abs((tip / activeTotal) * 100 - percentage) < 0.01
                     ? 'border-blue-600 bg-blue-50 shadow-md'
                     : 'border-gray-200 hover:border-gray-300 active:bg-gray-50'
                     }`}
                 >
                   <div className="font-semibold text-gray-800 text-base sm:text-sm">{percentage}%</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    ${((order.total * percentage) / 100).toFixed(2)}
+                    ${((activeTotal * percentage) / 100).toFixed(2)}
                   </div>
                 </button>
               ))}
@@ -524,7 +435,7 @@ export const ProcessPaymentPage: React.FC = () => {
             <div className="space-y-3">
               <div className="flex justify-between text-gray-600">
                 <span>Order Total</span>
-                <span>${order.total.toFixed(2)}</span>
+                <span>${activeTotal.toFixed(2)}</span>
               </div>
               {tip > 0 && (
                 <div className="flex justify-between text-gray-600">
@@ -543,24 +454,13 @@ export const ProcessPaymentPage: React.FC = () => {
 
           {/* Process Payment Button */}
           <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-            <button
-              onClick={handleProcessPayment}
-              disabled={processing || (paymentMethod === 'card' && !paymentToken)}
-              className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white px-6 py-5 rounded-lg font-semibold text-lg sm:text-xl transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 btn-touch-lg"
-            >
-              {processing ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="animate-spin">⏳</span>
-                  Processing...
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2">
-                  💳 Process Payment ${totalWithTip.toFixed(2)}
-                </span>
-              )}
-            </button>
+            <CheckoutButton
+              amount={totalWithTip}
+              onCheckout={handleProcessPayment}
+              disabled={paymentMethod === 'card' && !paymentToken}
+            />
             <p className="text-xs text-gray-500 text-center mt-3">
-              By processing this payment, you confirm the amount and payment method.
+              Al procesar este pago, confirmas el monto y el método de pago seleccionado.
             </p>
           </div>
 
@@ -575,7 +475,20 @@ export const ProcessPaymentPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {showQRModal && pendingPaymentId && (
+        <QRPaymentModal
+          paymentId={pendingPaymentId}
+          onSuccess={(payment) => {
+            setShowQRModal(false);
+            toast.success('Pago QR verificado!');
+            navigate(`/orders/${id}`);
+          }}
+          onCancel={() => {
+            setShowQRModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };
-

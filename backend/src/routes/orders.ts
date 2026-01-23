@@ -80,13 +80,14 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const restaurantId = req.user?.restaurantId;
-    if (!restaurantId) {
-      return res.status(400).json({ error: 'Restaurant ID required' });
+    const companyId = req.user?.companyId;
+
+    if (!restaurantId || !companyId) {
+      return res.status(400).json({ error: 'Restaurant and Company ID required' });
     }
 
     const { status, limit = 50, offset = 0 } = req.query;
 
-    // Mapear estados del frontend a estados de la base de datos
     const statusMap: Record<string, string[]> = {
       'pending': ['draft', 'pending', 'sent_to_kitchen'],
       'completed': ['completed', 'served', 'closed'],
@@ -97,10 +98,10 @@ router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
       SELECT o.*, t.table_number, t.name as table_name
       FROM orders o
       LEFT JOIN tables t ON o.table_id = t.id
-      WHERE t.restaurant_id = $1
+      WHERE o.company_id = $1 AND t.restaurant_id = $2
     `;
-    const params: any[] = [restaurantId];
-    let paramIndex = 2;
+    const params: any[] = [companyId, restaurantId];
+    let paramIndex = 3;
 
     if (status && statusMap[status as string]) {
       const statuses = statusMap[status as string];
@@ -112,12 +113,8 @@ router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
     query += ` ORDER BY o.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(parseInt(limit as string), parseInt(offset as string));
 
-    console.log('[Orders] Query:', query);
-    console.log('[Orders] Params:', params);
-
     const result = await pool.query(query, params);
 
-    // Obtener items para cada orden
     const ordersWithItems = await Promise.all(
       result.rows.map(async (row) => {
         const itemsResult = await pool.query(
@@ -125,7 +122,6 @@ router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
           [row.id]
         );
 
-        // Mapear el estado de la BD al estado del frontend
         let frontendStatus = row.status;
         if (statusMap.pending.includes(row.status)) {
           frontendStatus = 'pending';
@@ -142,69 +138,51 @@ router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
           paymentStatus: row.payment_status,
           subtotal: parseFloat(row.subtotal),
           tax: parseFloat(row.tax),
-          tip: parseFloat(row.tip || 0),
-          discount: parseFloat(row.discount || 0),
           total: parseFloat(row.total),
           createdAt: row.created_at,
-          paidAt: row.paid_at,
           tableId: row.table_id,
           tableNumber: row.table_number || row.table_name,
+          companyId: row.company_id,
           items: itemsResult.rows.map(item => ({
             id: item.id,
             name: item.name,
             price: parseFloat(item.price),
-            quantity: item.quantity,
-            notes: item.notes
+            quantity: item.quantity
           }))
         };
       })
     );
 
-    // Obtener el total de órdenes (sin límite)
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM orders o
-      LEFT JOIN tables t ON o.table_id = t.id
-      WHERE t.restaurant_id = $1
-      ${status && statusMap[status as string] ? `AND o.status = ANY($2)` : ''}
-    `;
-    const countParams: any[] = [restaurantId];
-    if (status && statusMap[status as string]) {
-      countParams.push(statusMap[status as string]);
-    }
-    const countResult = await pool.query(countQuery, countParams);
-    const total = parseInt(countResult.rows[0].total);
-
-    console.log('[Orders] Returning', ordersWithItems.length, 'orders (total:', total, ')');
-
-    return res.json({
-      orders: ordersWithItems,
-      total: total,
-      count: ordersWithItems.length
-    });
+    return res.json({ orders: ordersWithItems });
   } catch (error: any) {
     console.error('[Orders] Error listing orders:', error);
     return res.status(500).json({ error: error.message });
   }
 });
+
 /**
  * GET /api/v1/orders/:id
  * Get order details with items
  */
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const companyId = req.user?.companyId;
 
-    // Get order
-    const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Get order with company filter
+    const orderResult = await pool.query(
+      'SELECT * FROM orders WHERE id = $1 AND company_id = $2',
+      [id, companyId]
+    );
 
     if (orderResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Order not found' });
+      return res.status(404).json({ error: 'Order not found or unauthorized' });
     }
 
     const order = orderResult.rows[0];
 
-    // Get items
     const itemsResult = await pool.query(
       `SELECT oi.*, mi.description as item_description
        FROM order_items oi
@@ -218,25 +196,18 @@ router.get('/:id', async (req: Request, res: Response) => {
       orderNumber: order.order_number,
       tableId: order.table_id,
       waiterId: order.waiter_id,
+      companyId: order.company_id,
       status: order.status,
       paymentStatus: order.payment_status,
       subtotal: parseFloat(order.subtotal),
       tax: parseFloat(order.tax),
-      tip: parseFloat(order.tip),
-      discount: parseFloat(order.discount),
       total: parseFloat(order.total),
-      checkRequestedAt: order.check_requested_at || null,
       items: itemsResult.rows.map(row => ({
         id: row.id,
-        menuItemId: row.menu_item_id,
         name: row.name,
-        description: row.item_description,
         price: parseFloat(row.price),
-        quantity: row.quantity,
-        notes: row.notes
-      })),
-      createdAt: order.created_at,
-      paidAt: order.paid_at
+        quantity: row.quantity
+      }))
     });
   } catch (error: any) {
     console.error('[Orders] Error getting order:', error);
@@ -443,7 +414,7 @@ router.post('/:id/request-check', async (req: Request, res: Response) => {
 
     // Check if check already requested
     if (order.check_requested_at) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Check already requested',
         checkRequestedAt: order.check_requested_at
       });
@@ -524,7 +495,7 @@ router.post('/:id/cancel-check', async (req: Request, res: Response) => {
 
     // Check if check was requested
     if (!order.check_requested_at) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Check was not requested for this order'
       });
     }

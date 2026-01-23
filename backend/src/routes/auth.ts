@@ -14,6 +14,7 @@ export interface AuthRequest extends Request {
     email: string;
     role: string;
     restaurantId: string;
+    companyId: string;
   };
 }
 
@@ -42,20 +43,25 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
  */
 router.post('/login', async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, companySlug } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password required' });
     }
 
-    // Find user
+    const slug = companySlug || 'default';
+
+    // Find user with company context
     const result = await pool.query(
-      'SELECT id, email, password_hash, name, role, restaurant_id, active FROM users WHERE email = $1',
-      [email]
+      `SELECT u.id, u.email, u.password_hash, u.name, u.role, u.restaurant_id, u.company_id, u.active 
+       FROM users u
+       JOIN companies c ON u.company_id = c.id
+       WHERE u.email = $1 AND c.slug = $2`,
+      [email, slug]
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'Invalid credentials or company' });
     }
 
     const user = result.rows[0];
@@ -78,7 +84,8 @@ router.post('/login', async (req: Request, res: Response) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        restaurantId: user.restaurant_id
+        restaurantId: user.restaurant_id,
+        companyId: user.company_id
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -94,7 +101,8 @@ router.post('/login', async (req: Request, res: Response) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        restaurantId: user.restaurant_id
+        restaurantId: user.restaurant_id,
+        companyId: user.company_id
       }
     });
   } catch (error: any) {

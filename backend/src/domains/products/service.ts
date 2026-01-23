@@ -9,20 +9,21 @@ import { v4 as uuidv4 } from 'uuid';
 import { Product, Modifier, CreateProductRequest, UpdateProductRequest, CreateModifierRequest, ProductWithModifiers } from './types';
 
 export class ProductsService {
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool) { }
 
   /**
    * Create Product
    */
-  async createProduct(request: CreateProductRequest): Promise<Product> {
+  async createProduct(request: CreateProductRequest, companyId: string): Promise<Product> {
     const productId = uuidv4();
 
     const result = await this.pool.query(
-      `INSERT INTO menu_items (id, category_id, name, description, price, base_price, image_url, available, active, metadata)
-       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $7, $8)
+      `INSERT INTO menu_items (id, company_id, category_id, name, description, price, base_price, image_url, available, active, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $8, $9)
        RETURNING id, name, category_id, base_price, available as active, description, image_url, metadata, created_at`,
       [
         productId,
+        companyId,
         request.categoryId,
         request.name,
         request.description || null,
@@ -39,15 +40,15 @@ export class ProductsService {
   /**
    * Get Product by ID
    */
-  async getProduct(productId: string): Promise<Product> {
+  async getProduct(productId: string, companyId: string): Promise<Product> {
     const result = await this.pool.query(
       `SELECT id, name, category_id, base_price, price, available as active, description, image_url, metadata, created_at
-       FROM menu_items WHERE id = $1`,
-      [productId]
+       FROM menu_items WHERE id = $1 AND company_id = $2`,
+      [productId, companyId]
     );
 
     if (result.rows.length === 0) {
-      throw new Error(`Product ${productId} not found`);
+      throw new Error(`Product ${productId} not found or unauthorized`);
     }
 
     return this.mapRowToProduct(result.rows[0]);
@@ -56,17 +57,17 @@ export class ProductsService {
   /**
    * Get Product with Modifiers
    */
-  async getProductWithModifiers(productId: string): Promise<ProductWithModifiers> {
-    const product = await this.getProduct(productId);
+  async getProductWithModifiers(productId: string, companyId: string): Promise<ProductWithModifiers> {
+    const product = await this.getProduct(productId, companyId);
 
     // Get modifiers for product
     const modifiersResult = await this.pool.query(
       `SELECT m.id, m.name, m.price_delta, m.active, m.created_at
        FROM modifiers m
        INNER JOIN product_modifiers pm ON m.id = pm.modifier_id
-       WHERE pm.product_id = $1 AND m.active = true
+       WHERE pm.product_id = $1 AND m.active = true AND m.company_id = $2
        ORDER BY m.name ASC`,
-      [productId]
+      [productId, companyId]
     );
 
     const modifiers = modifiersResult.rows.map(row => ({
@@ -86,14 +87,14 @@ export class ProductsService {
   /**
    * Get All Products by Category
    */
-  async getProductsByCategory(categoryId: string, activeOnly: boolean = true): Promise<Product[]> {
+  async getProductsByCategory(categoryId: string, companyId: string, activeOnly: boolean = true): Promise<Product[]> {
     let query = `
       SELECT id, name, category_id, base_price, price, available as active, description, image_url, metadata, created_at
       FROM menu_items
-      WHERE category_id = $1
+      WHERE category_id = $1 AND company_id = $2
     `;
 
-    const params: any[] = [categoryId];
+    const params: any[] = [categoryId, companyId];
 
     if (activeOnly) {
       query += ` AND available = true`;
@@ -109,12 +110,13 @@ export class ProductsService {
   /**
    * Get All Active Products
    */
-  async getActiveProducts(): Promise<Product[]> {
+  async getActiveProducts(companyId: string): Promise<Product[]> {
     const result = await this.pool.query(
       `SELECT id, name, category_id, base_price, price, available as active, description, image_url, metadata, created_at
        FROM menu_items
-       WHERE available = true
-       ORDER BY name ASC`
+       WHERE available = true AND company_id = $1
+       ORDER BY name ASC`,
+      [companyId]
     );
 
     return result.rows.map(row => this.mapRowToProduct(row));
@@ -123,7 +125,10 @@ export class ProductsService {
   /**
    * Update Product
    */
-  async updateProduct(productId: string, request: UpdateProductRequest): Promise<Product> {
+  async updateProduct(productId: string, companyId: string, request: UpdateProductRequest): Promise<Product> {
+    // Verify ownership first
+    await this.getProduct(productId, companyId);
+
     const updates: string[] = [];
     const params: any[] = [];
     let paramCount = 1;
@@ -166,37 +171,41 @@ export class ProductsService {
     }
 
     if (updates.length === 0) {
-      return this.getProduct(productId);
+      return this.getProduct(productId, companyId);
     }
 
     params.push(productId);
+    params.push(companyId);
+
+    const finalParamIndex = paramCount;
+    const companyIdParamIndex = paramCount + 1;
 
     await this.pool.query(
-      `UPDATE menu_items SET ${updates.join(', ')} WHERE id = $${paramCount}`,
+      `UPDATE menu_items SET ${updates.join(', ')} WHERE id = $${finalParamIndex} AND company_id = $${companyIdParamIndex}`,
       params
     );
 
-    return this.getProduct(productId);
+    return this.getProduct(productId, companyId);
   }
 
   /**
    * Delete Product (soft delete - set active = false)
    */
-  async deleteProduct(productId: string): Promise<void> {
-    await this.updateProduct(productId, { active: false });
+  async deleteProduct(productId: string, companyId: string): Promise<void> {
+    await this.updateProduct(productId, companyId, { active: false });
   }
 
   /**
    * Create Modifier
    */
-  async createModifier(request: CreateModifierRequest): Promise<Modifier> {
+  async createModifier(request: CreateModifierRequest, companyId: string): Promise<Modifier> {
     const modifierId = uuidv4();
 
     const result = await this.pool.query(
-      `INSERT INTO modifiers (id, name, price_delta, active)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO modifiers (id, company_id, name, price_delta, active)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id, name, price_delta, active, created_at`,
-      [modifierId, request.name, request.priceDelta, request.active !== false]
+      [modifierId, companyId, request.name, request.priceDelta, request.active !== false]
     );
 
     return {
@@ -211,11 +220,11 @@ export class ProductsService {
   /**
    * Get Modifier by ID
    */
-  async getModifier(modifierId: string): Promise<Modifier> {
+  async getModifier(modifierId: string, companyId: string): Promise<Modifier> {
     const result = await this.pool.query(
       `SELECT id, name, price_delta, active, created_at
-       FROM modifiers WHERE id = $1`,
-      [modifierId]
+       FROM modifiers WHERE id = $1 AND company_id = $2`,
+      [modifierId, companyId]
     );
 
     if (result.rows.length === 0) {
@@ -235,12 +244,13 @@ export class ProductsService {
   /**
    * Get All Active Modifiers
    */
-  async getActiveModifiers(): Promise<Modifier[]> {
+  async getActiveModifiers(companyId: string): Promise<Modifier[]> {
     const result = await this.pool.query(
       `SELECT id, name, price_delta, active, created_at
        FROM modifiers
-       WHERE active = true
-       ORDER BY name ASC`
+       WHERE active = true AND company_id = $1
+       ORDER BY name ASC`,
+      [companyId]
     );
 
     return result.rows.map(row => ({
@@ -255,29 +265,29 @@ export class ProductsService {
   /**
    * Add Modifier to Product
    */
-  async addModifierToProduct(productId: string, modifierId: string): Promise<void> {
-    // Verify product and modifier exist
-    await this.getProduct(productId);
-    await this.getModifier(modifierId);
+  async addModifierToProduct(productId: string, modifierId: string, companyId: string): Promise<void> {
+    // Verify product and modifier exist and belong to company
+    await this.getProduct(productId, companyId);
+    await this.getModifier(modifierId, companyId);
 
     const id = uuidv4();
 
     await this.pool.query(
-      `INSERT INTO product_modifiers (id, product_id, modifier_id)
-       VALUES ($1, $2, $3)
+      `INSERT INTO product_modifiers (id, product_id, modifier_id, company_id)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT DO NOTHING`,
-      [id, productId, modifierId]
+      [id, productId, modifierId, companyId]
     );
   }
 
   /**
    * Remove Modifier from Product
    */
-  async removeModifierFromProduct(productId: string, modifierId: string): Promise<void> {
+  async removeModifierFromProduct(productId: string, modifierId: string, companyId: string): Promise<void> {
     await this.pool.query(
       `DELETE FROM product_modifiers
-       WHERE product_id = $1 AND modifier_id = $2`,
-      [productId, modifierId]
+       WHERE product_id = $1 AND modifier_id = $2 AND company_id = $3`,
+      [productId, modifierId, companyId]
     );
   }
 
@@ -287,7 +297,7 @@ export class ProductsService {
   private mapRowToProduct(row: any): Product {
     // Ensure name is always a string (never null or undefined)
     const productName = row.name && row.name.trim() ? row.name.trim() : `Producto ${row.id.substring(0, 8)}`;
-    
+
     // Parse metadata if it exists
     let metadata: Record<string, any> | undefined = undefined;
     if (row.metadata) {
@@ -298,7 +308,7 @@ export class ProductsService {
         metadata = {};
       }
     }
-    
+
     return {
       id: row.id,
       name: productName,

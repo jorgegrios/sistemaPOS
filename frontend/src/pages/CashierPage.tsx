@@ -67,6 +67,12 @@ export const CashierPage: React.FC = () => {
   const [showOpenSessionModal, setShowOpenSessionModal] = useState(false);
   const [openingBalanceInput, setOpeningBalanceInput] = useState('');
 
+  // Blind Close state
+  const [showCloseSessionModal, setShowCloseSessionModal] = useState(false);
+  const [actualBalanceInput, setActualBalanceInput] = useState('');
+  const [showDiscrepancyReport, setShowDiscrepancyReport] = useState(false);
+  const [reportData, setReportData] = useState<any>(null);
+
   // Update date and time
   useEffect(() => {
     const timer = setInterval(() => {
@@ -108,6 +114,32 @@ export const CashierPage: React.FC = () => {
       toast.success('Caja abierta exitosamente');
     } catch (err: any) {
       toast.error(err.message || 'Error al abrir caja');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleCloseSession = async () => {
+    if (!currentSession) return;
+    if (!actualBalanceInput || isNaN(parseFloat(actualBalanceInput))) {
+      toast.error('Ingrese un monto de cierre válido');
+      return;
+    }
+
+    try {
+      setProcessing(true);
+      const report = await cashierService.closeSession(
+        currentSession.id,
+        parseFloat(actualBalanceInput)
+      );
+
+      setReportData(report);
+      setShowCloseSessionModal(false);
+      setShowDiscrepancyReport(true);
+      setCurrentSession(null);
+      toast.success('Caja cerrada exitosamente');
+    } catch (err: any) {
+      toast.error(err.message || 'Error al cerrar caja');
     } finally {
       setProcessing(false);
     }
@@ -500,6 +532,16 @@ export const CashierPage: React.FC = () => {
           >
             💳 Órdenes Pagadas
           </button>
+
+          {currentSession && (
+            <button
+              onClick={() => setShowCloseSessionModal(true)}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-semibold text-sm btn-touch transition active:scale-95 flex items-center gap-2"
+            >
+              🔒 Cerrar Caja
+            </button>
+          )}
+
           <div className="flex flex-col items-end gap-1 bg-white/20 backdrop-blur-sm px-3 py-2 rounded-lg border-2 border-white/30">
             <p className="text-white text-xs font-semibold">
               {currentDateTime.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
@@ -1001,7 +1043,110 @@ export const CashierPage: React.FC = () => {
           </button>
         </div>
       </Modal>
-    </div>
+
+      {/* Blind Close Modal */}
+      <Modal
+        isOpen={showCloseSessionModal}
+        title="🔒 Cierre de Caja Ciego"
+        onClose={() => setShowCloseSessionModal(false)}
+      >
+        <div className="space-y-4">
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+            <p className="text-sm text-yellow-700">
+              <strong>Atención:</strong> Ingrese el total de efectivo contado físicamente en el cajón.
+              El sistema comparará este monto con el esperado una vez realizado el cierre.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Monto Total Contado ($)</label>
+            <input
+              type="number"
+              value={actualBalanceInput}
+              onChange={(e) => setActualBalanceInput(e.target.value)}
+              placeholder="0.00"
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-xl font-mono focus:border-red-500 outline-none transition"
+              autoFocus
+            />
+          </div>
+
+          <button
+            onClick={handleCloseSession}
+            disabled={processing}
+            className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-lg btn-touch transition active:scale-95 disabled:bg-gray-400"
+          >
+            {processing ? 'Cerrando...' : 'Confirmar Cierre de Caja'}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Discrepancy Report Modal */}
+      <Modal
+        isOpen={showDiscrepancyReport}
+        title="📊 Reporte Final de Caja"
+        onClose={() => {
+          setShowDiscrepancyReport(false);
+          window.location.reload(); // Refresh to show open session modal again if needed
+        }}
+      >
+        {reportData && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <p className="text-sm text-gray-500 uppercase font-semibold">Esperado</p>
+                <p className="text-2xl font-bold text-gray-800">${reportData.expectedBalance.toFixed(2)}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <p className="text-sm text-gray-500 uppercase font-semibold">Reportado</p>
+                <p className="text-2xl font-bold text-gray-800">${reportData.actualBalance.toFixed(2)}</p>
+              </div>
+            </div>
+
+            <div className={`p-6 rounded-2xl text-center border-4 ${Math.abs(reportData.discrepancy) < 0.01
+              ? 'bg-green-50 border-green-400 text-green-800'
+              : reportData.discrepancy > 0
+                ? 'bg-blue-50 border-blue-400 text-blue-800'
+                : 'bg-red-50 border-red-400 text-red-800'
+              }`}>
+              <p className="text-sm uppercase font-bold mb-1">Diferencia</p>
+              <p className="text-4xl font-black">
+                {reportData.discrepancy >= 0 ? '+' : '-'}${Math.abs(reportData.discrepancy).toFixed(2)}
+              </p>
+              <p className="text-lg font-bold mt-2">
+                {Math.abs(reportData.discrepancy) < 0.01
+                  ? '🎯 Caja Cuadrada'
+                  : reportData.discrepancy > 0
+                    ? '💰 Sobrante'
+                    : '📉 Faltante'}
+              </p>
+            </div>
+
+            <div className="bg-indigo-50 p-4 rounded-xl text-sm text-indigo-800">
+              <ul className="space-y-2">
+                <li className="flex justify-between">
+                  <span>Apertura:</span>
+                  <span className="font-semibold">${reportData.openingBalance.toFixed(2)}</span>
+                </li>
+                <li className="flex justify-between">
+                  <span>Ventas/Movimientos:</span>
+                  <span className="font-semibold">${(reportData.expectedBalance - reportData.openingBalance).toFixed(2)}</span>
+                </li>
+              </ul>
+            </div>
+
+            <button
+              onClick={() => {
+                setShowDiscrepancyReport(false);
+                window.location.reload();
+              }}
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg btn-touch transition active:scale-95"
+            >
+              Finalizar Turno
+            </button>
+          </div>
+        )}
+      </Modal>
+    </div >
   );
 };
 

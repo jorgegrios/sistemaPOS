@@ -91,7 +91,7 @@ const corsOptions = {
   },
   credentials: true, // Permitir cookies y headers de autenticación
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Restaurant-ID', 'x-restaurant-id', 'X-Company-ID', 'x-company-id'],
   exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page']
 };
 
@@ -311,7 +311,8 @@ onEvent(DomainEventType.PAYMENT_COMPLETED, async (payload: any) => {
     const { orderId } = payload;
     // Check if order can be closed (all items served and payment completed)
     try {
-      await ordersService.closeOrder(orderId);
+      const { companyId } = payload;
+      await ordersService.closeOrder(orderId, companyId);
       console.log(`[Event] Order ${orderId} closed after payment completion`);
 
       // Update cash session expected balance if it was a cash payment

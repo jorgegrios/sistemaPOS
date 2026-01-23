@@ -19,12 +19,12 @@ export class OrdersService {
    * Returns existing order if active order exists for table
    */
   async createOrder(request: CreateOrderRequest): Promise<Order> {
-    // IDEMPOTENCY CHECK: Check if active order exists for table
-    const existingOrderId = await getActiveOrderForTable(this.pool, request.tableId);
+    // IDEMPOTENCY CHECK: Check if active order exists for table (within company context)
+    const existingOrderId = await getActiveOrderForTable(this.pool, request.tableId, request.companyId);
 
     if (existingOrderId) {
       // Return existing order (idempotent)
-      return this.getOrder(existingOrderId);
+      return this.getOrder(existingOrderId, request.companyId);
     }
 
     // Create new draft order
@@ -32,10 +32,10 @@ export class OrdersService {
     const orderNumber = `ORD-${Date.now()}`;
 
     const result = await this.pool.query(
-      `INSERT INTO orders (id, order_number, table_id, waiter_id, status, subtotal, tax, total)
-       VALUES ($1, $2, $3, $4, 'draft', 0, 0, 0)
-       RETURNING id, table_id, waiter_id, status, subtotal, tax, total, created_at`,
-      [orderId, orderNumber, request.tableId, request.waiterId]
+      `INSERT INTO orders (id, order_number, table_id, waiter_id, company_id, status, subtotal, tax, total)
+       VALUES ($1, $2, $3, $4, $5, 'draft', 0, 0, 0)
+       RETURNING id, table_id, waiter_id, company_id, status, subtotal, tax, total, created_at`,
+      [orderId, orderNumber, request.tableId, request.waiterId, request.companyId]
     );
 
     const order = this.mapRowToOrder(result.rows[0]);
@@ -45,7 +45,8 @@ export class OrdersService {
       orderId: order.id,
       tableId: order.tableId,
       waiterId: order.waiterId,
-    });
+      companyId: order.companyId
+    } as any);
 
     return order;
   }
@@ -53,15 +54,15 @@ export class OrdersService {
   /**
    * Get Order by ID
    */
-  async getOrder(orderId: string): Promise<Order> {
+  async getOrder(orderId: string, companyId: string): Promise<Order> {
     const result = await this.pool.query(
-      `SELECT id, table_id, waiter_id, status, subtotal, tax, total, created_at
-       FROM orders WHERE id = $1`,
-      [orderId]
+      `SELECT id, table_id, waiter_id, company_id, status, subtotal, tax, total, created_at
+       FROM orders WHERE id = $1 AND company_id = $2`,
+      [orderId, companyId]
     );
 
     if (result.rows.length === 0) {
-      throw new Error(`Order ${orderId} not found`);
+      throw new Error(`Order ${orderId} not found or unauthorized`);
     }
 
     return this.mapRowToOrder(result.rows[0]);
@@ -70,9 +71,9 @@ export class OrdersService {
   /**
    * Get Order with Items
    */
-  async getOrderWithItems(orderId: string): Promise<OrderWithItems> {
-    const order = await this.getOrder(orderId);
-    const items = await this.getOrderItems(orderId);
+  async getOrderWithItems(orderId: string, companyId: string): Promise<OrderWithItems> {
+    const order = await this.getOrder(orderId, companyId);
+    const items = await this.getOrderItems(orderId, companyId);
 
     return {
       ...order,
@@ -85,9 +86,9 @@ export class OrdersService {
    * RULE: Only add items if order is in 'draft' status
    * RULE: Freeze price at time of order (price_snapshot)
    */
-  async addItemsToOrder(orderId: string, request: AddItemsRequest): Promise<OrderItem[]> {
+  async addItemsToOrder(orderId: string, companyId: string, request: AddItemsRequest): Promise<OrderItem[]> {
     // Verify order exists and is in a modifiable status (draft or sent_to_kitchen)
-    const order = await this.getOrder(orderId);
+    const order = await this.getOrder(orderId, companyId);
 
     if (order.status !== 'draft' && order.status !== 'sent_to_kitchen') {
       throw new Error(`Cannot add items to order with status: ${order.status}`);
@@ -98,16 +99,15 @@ export class OrdersService {
     // Get product prices and add items
     for (const item of request.items) {
       // Get product price (freeze it)
-      // Note: menu_items table uses 'available' column, not 'active'
       const productResult = await this.pool.query(
         `SELECT COALESCE(base_price, price) as base_price, name 
          FROM menu_items 
-         WHERE id = $1 AND available = true`,
-        [item.productId]
+         WHERE id = $1 AND available = true AND company_id = $2`,
+        [item.productId, companyId]
       );
 
       if (productResult.rows.length === 0) {
-        throw new Error(`Product ${item.productId} not found or unavailable`);
+        throw new Error(`Product ${item.productId} not found or unavailable in this company`);
       }
 
       const product = productResult.rows[0];
@@ -116,9 +116,9 @@ export class OrdersService {
       // Create order item
       const itemId = uuidv4();
       await this.pool.query(
-        `INSERT INTO order_items (id, order_id, product_id, menu_item_id, name, price, quantity, notes, status)
-         VALUES ($1, $2, $3, $3, $4, $5, $6, $7, 'pending')`,
-        [itemId, orderId, item.productId, product.name, priceSnapshot, item.quantity, item.notes || null]
+        `INSERT INTO order_items (id, order_id, company_id, product_id, menu_item_id, name, price, quantity, notes, status)
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, 'pending')`,
+        [itemId, orderId, companyId, item.productId, product.name, priceSnapshot, item.quantity, item.notes || null]
       );
 
       newItems.push({
@@ -135,11 +135,12 @@ export class OrdersService {
     }
 
     // Recalculate totals
-    await this.recalculateOrderTotals(orderId);
+    await this.recalculateOrderTotals(orderId, companyId);
 
     // Emit event
     emitEvent(DomainEventType.ORDER_ITEMS_ADDED, {
       orderId,
+      companyId,
       items: newItems.map(item => ({
         id: item.id,
         productId: item.productId,
@@ -154,9 +155,9 @@ export class OrdersService {
    * Remove all items from order (only for draft orders)
    * Used to sync cart with database before sending to kitchen
    */
-  async removeAllItemsFromOrder(orderId: string): Promise<void> {
+  async removeAllItemsFromOrder(orderId: string, companyId: string): Promise<void> {
     // Verify order exists and is in draft status
-    const order = await this.getOrder(orderId);
+    const order = await this.getOrder(orderId, companyId);
 
     if (order.status !== 'draft') {
       throw new Error(`Cannot remove items from order with status: ${order.status}`);
@@ -170,8 +171,8 @@ export class OrdersService {
 
     // Reset order totals
     await this.pool.query(
-      `UPDATE orders SET subtotal = 0, tax = 0, total = 0 WHERE id = $1`,
-      [orderId]
+      `UPDATE orders SET subtotal = 0, tax = 0, total = 0 WHERE id = $1 AND company_id = $2`,
+      [orderId, companyId]
     );
   }
 
@@ -181,16 +182,15 @@ export class OrdersService {
    * RULE: Change all order_items.status to 'sent'
    * RULE: Do not resend if already sent (idempotent)
    */
-  async sendToKitchen(orderId: string): Promise<Order> {
+  async sendToKitchen(orderId: string, companyId: string): Promise<Order> {
     // Verify order exists and is in a valid status for preparation
-    const order = await this.getOrder(orderId);
+    const order = await this.getOrder(orderId, companyId);
 
     if (order.status !== 'draft' && order.status !== 'sent_to_kitchen' && order.status !== 'served') {
       throw new Error(`Cannot send order to kitchen with status: ${order.status}`);
     }
 
     // Change all 'pending' order items status to 'sent'
-    // This allows additions to be "sent" even if the order was already sent once
     const updateResult = await this.pool.query(
       `UPDATE order_items 
        SET status = 'sent' 
@@ -202,23 +202,20 @@ export class OrdersService {
     const updatedItemCount = updateResult.rows.length;
 
     // If order was in 'draft', change its status to 'sent_to_kitchen'
-    // Also if it was 'served', move it back to 'sent_to_kitchen' because new items are being prepared
     if (order.status === 'draft' || order.status === 'served') {
       await this.pool.query(
-        `UPDATE orders SET status = 'sent_to_kitchen' WHERE id = $1`,
-        [orderId]
+        `UPDATE orders SET status = 'sent_to_kitchen' WHERE id = $1 AND company_id = $2`,
+        [orderId, companyId]
       );
     }
 
-    // Only emit event if something actually changed (pending items were sent)
-    // or if the order just transitioned from draft
+    // Only emit event if something actually changed
     if (updatedItemCount > 0 || order.status === 'draft') {
-      // Get order items for event
-      const items = await this.getOrderItems(orderId);
+      const items = await this.getOrderItems(orderId, companyId);
 
-      // Emit event (include tableId for table occupation)
       emitEvent(DomainEventType.ORDER_SENT_TO_KITCHEN, {
         orderId,
+        companyId,
         tableId: order.tableId,
         items: items.map(item => ({
           id: item.id,
@@ -228,22 +225,22 @@ export class OrdersService {
       } as any);
     }
 
-    return this.getOrder(orderId);
+    return this.getOrder(orderId, companyId);
   }
 
   /**
    * Mark Order as Served
    * RULE: Only if all items are 'prepared' or 'served'
    */
-  async markAsServed(orderId: string): Promise<Order> {
-    const order = await this.getOrder(orderId);
+  async markAsServed(orderId: string, companyId: string): Promise<Order> {
+    const order = await this.getOrder(orderId, companyId);
 
     if (order.status !== 'sent_to_kitchen') {
       throw new Error(`Cannot mark order as served with status: ${order.status}`);
     }
 
     // Verify all items are prepared or served
-    const items = await this.getOrderItems(orderId);
+    const items = await this.getOrderItems(orderId, companyId);
     const allPreparedOrServed = items.every(item =>
       item.status === 'prepared' || item.status === 'served'
     );
@@ -260,18 +257,19 @@ export class OrdersService {
 
     // Change order status
     await this.pool.query(
-      `UPDATE orders SET status = 'served' WHERE id = $1`,
-      [orderId]
+      `UPDATE orders SET status = 'served' WHERE id = $1 AND company_id = $2`,
+      [orderId, companyId]
     );
 
     // Emit event
     emitEvent(DomainEventType.ORDER_SERVED, {
       orderId,
+      companyId,
       tableId: order.tableId,
       waiterId: order.waiterId,
     } as any);
 
-    return this.getOrder(orderId);
+    return this.getOrder(orderId, companyId);
   }
 
   /**
@@ -279,8 +277,8 @@ export class OrdersService {
    * RULE: Only if all items are 'served'
    * RULE: Only if payment is completed
    */
-  async closeOrder(orderId: string): Promise<Order> {
-    const order = await this.getOrder(orderId);
+  async closeOrder(orderId: string, companyId: string): Promise<Order> {
+    const order = await this.getOrder(orderId, companyId);
 
     if (order.status === 'closed') {
       // Already closed (idempotent)
@@ -294,15 +292,16 @@ export class OrdersService {
 
     // Change order status to closed
     await this.pool.query(
-      `UPDATE orders SET status = 'closed' WHERE id = $1`,
-      [orderId]
+      `UPDATE orders SET status = 'closed' WHERE id = $1 AND company_id = $2`,
+      [orderId, companyId]
     );
 
-    const closedOrder = await this.getOrder(orderId);
+    const closedOrder = await this.getOrder(orderId, companyId);
 
     // Emit event
     emitEvent(DomainEventType.ORDER_CLOSED, {
       orderId: closedOrder.id,
+      companyId: closedOrder.companyId,
       tableId: closedOrder.tableId,
       waiterId: closedOrder.waiterId,
     } as any);
@@ -313,31 +312,35 @@ export class OrdersService {
   /**
    * Cancel Order
    */
-  async cancelOrder(orderId: string): Promise<Order> {
-    const order = await this.getOrder(orderId);
+  async cancelOrder(orderId: string, companyId: string): Promise<Order> {
+    const order = await this.getOrder(orderId, companyId);
 
     if (order.status === 'closed') {
       throw new Error('Cannot cancel closed order');
     }
 
     await this.pool.query(
-      `UPDATE orders SET status = 'cancelled' WHERE id = $1`,
-      [orderId]
+      `UPDATE orders SET status = 'cancelled' WHERE id = $1 AND company_id = $2`,
+      [orderId, companyId]
     );
 
     emitEvent(DomainEventType.ORDER_CANCELLED, {
       orderId,
+      companyId,
       tableId: order.tableId,
       waiterId: order.waiterId,
     } as any);
 
-    return this.getOrder(orderId);
+    return this.getOrder(orderId, companyId);
   }
 
   /**
    * Get Order Items
    */
-  async getOrderItems(orderId: string): Promise<OrderItem[]> {
+  async getOrderItems(orderId: string, companyId: string): Promise<OrderItem[]> {
+    // Security check: Verify order belongs to company
+    await this.getOrder(orderId, companyId);
+
     const result = await this.pool.query(
       `SELECT id, order_id, product_id, name, quantity, price as price_snapshot, status, notes, created_at
        FROM order_items WHERE order_id = $1
@@ -361,7 +364,7 @@ export class OrdersService {
   /**
    * Recalculate Order Totals
    */
-  private async recalculateOrderTotals(orderId: string): Promise<void> {
+  private async recalculateOrderTotals(orderId: string, companyId: string): Promise<void> {
     const result = await this.pool.query(
       `SELECT SUM(price * quantity) as subtotal
        FROM order_items WHERE order_id = $1`,
@@ -373,8 +376,8 @@ export class OrdersService {
     const total = subtotal + tax;
 
     await this.pool.query(
-      `UPDATE orders SET subtotal = $1, tax = $2, total = $3 WHERE id = $4`,
-      [subtotal, tax, total, orderId]
+      `UPDATE orders SET subtotal = $1, tax = $2, total = $3 WHERE id = $4 AND company_id = $5`,
+      [subtotal, tax, total, orderId, companyId]
     );
   }
 
@@ -383,8 +386,10 @@ export class OrdersService {
    * RULE: If 'pending', delete the record
    * RULE: If 'sent', 'prepared', or 'served', change status to 'cancelled'
    */
-  async cancelOrderItem(orderId: string, itemId: string): Promise<void> {
-    // Check if item exists and get its current status
+  async cancelOrderItem(orderId: string, itemId: string, companyId: string): Promise<void> {
+    // Check if item exists and belongs to company via order
+    await this.getOrder(orderId, companyId);
+
     const itemResult = await this.pool.query(
       `SELECT status FROM order_items WHERE id = $1 AND order_id = $2`,
       [itemId, orderId]
@@ -397,30 +402,27 @@ export class OrdersService {
     const { status } = itemResult.rows[0];
 
     if (status === 'pending') {
-      // Draft item - just delete it
       await this.pool.query(
         `DELETE FROM order_items WHERE id = $1`,
         [itemId]
       );
-      console.log(`[Order] Item ${itemId} deleted (was pending)`);
     } else {
-      // Sent/Prepared item - mark as cancelled for accountability
       await this.pool.query(
         `UPDATE order_items SET status = 'cancelled' WHERE id = $1`,
         [itemId]
       );
-      console.log(`[Order] Item ${itemId} marked as cancelled (was ${status})`);
     }
 
     // Recalculate totals
-    await this.recalculateOrderTotals(orderId);
+    await this.recalculateOrderTotals(orderId, companyId);
 
     // Emit event
     emitEvent(DomainEventType.ORDER_ITEM_CANCELLED, {
       orderId,
+      companyId,
       itemId,
       previousStatus: status
-    });
+    } as any);
   }
 
   /**
@@ -431,6 +433,7 @@ export class OrdersService {
       id: row.id,
       tableId: row.table_id,
       waiterId: row.waiter_id,
+      companyId: row.company_id,
       status: row.status,
       subtotal: parseFloat(row.subtotal),
       tax: parseFloat(row.tax),

@@ -20,13 +20,13 @@ class TableService {
   /**
    * Get all tables for a restaurant
    */
-  async getTables(restaurantId: string): Promise<Table[]> {
+  async getTables(restaurantId: string, companyId: string): Promise<Table[]> {
     const result = await pool.query(
-      `SELECT id, restaurant_id, table_number, capacity, status, created_at
+      `SELECT id, restaurant_id, table_number, capacity, status, created_at, company_id
        FROM tables
-       WHERE restaurant_id = $1
+       WHERE restaurant_id = $1 AND company_id = $2
        ORDER BY table_number`,
-      [restaurantId]
+      [restaurantId, companyId]
     );
 
     return result.rows.map(row => ({
@@ -42,12 +42,12 @@ class TableService {
   /**
    * Get a single table by ID
    */
-  async getTable(id: string): Promise<Table | null> {
+  async getTable(id: string, companyId: string): Promise<Table | null> {
     const result = await pool.query(
       `SELECT id, restaurant_id, table_number, capacity, status, created_at
        FROM tables
-       WHERE id = $1`,
-      [id]
+       WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
     );
 
     if (result.rows.length === 0) {
@@ -68,12 +68,12 @@ class TableService {
   /**
    * Create a new table
    */
-  async createTable(restaurantId: string, tableNumber: string, capacity: number): Promise<Table> {
+  async createTable(restaurantId: string, tableNumber: string, capacity: number, companyId: string): Promise<Table> {
     const result = await pool.query(
-      `INSERT INTO tables (restaurant_id, table_number, capacity, status)
-       VALUES ($1, $2, $3, 'available')
+      `INSERT INTO tables (restaurant_id, company_id, table_number, capacity, status)
+       VALUES ($1, $2, $3, $4, 'available')
        RETURNING id, restaurant_id, table_number, capacity, status, created_at`,
-      [restaurantId, tableNumber, capacity]
+      [restaurantId, companyId, tableNumber, capacity]
     );
 
     const row = result.rows[0];
@@ -90,7 +90,7 @@ class TableService {
   /**
    * Update a table
    */
-  async updateTable(id: string, tableNumber?: string, capacity?: number, status?: string): Promise<Table> {
+  async updateTable(id: string, companyId: string, tableNumber?: string, capacity?: number, status?: string): Promise<Table> {
     const updates: string[] = [];
     const values: any[] = [];
     let paramCount = 1;
@@ -109,24 +109,26 @@ class TableService {
     }
 
     if (updates.length === 0) {
-      const table = await this.getTable(id);
+      const table = await this.getTable(id, companyId);
       if (!table) {
-        throw new Error('Table not found');
+        throw new Error('Table not found or unauthorized');
       }
       return table;
     }
 
     values.push(id);
+    values.push(companyId);
+
     const result = await pool.query(
       `UPDATE tables
        SET ${updates.join(', ')}
-       WHERE id = $${paramCount}
+       WHERE id = $${paramCount} AND company_id = $${paramCount + 1}
        RETURNING id, restaurant_id, table_number, capacity, status, created_at`,
       values
     );
 
     if (result.rows.length === 0) {
-      throw new Error('Table not found');
+      throw new Error('Table not found or unauthorized');
     }
 
     const row = result.rows[0];
@@ -143,14 +145,14 @@ class TableService {
   /**
    * Delete a table
    */
-  async deleteTable(id: string): Promise<void> {
+  async deleteTable(id: string, companyId: string): Promise<void> {
     const result = await pool.query(
-      `DELETE FROM tables WHERE id = $1`,
-      [id]
+      `DELETE FROM tables WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
     );
 
     if (result.rowCount === 0) {
-      throw new Error('Table not found');
+      throw new Error('Table not found or unauthorized');
     }
   }
 }

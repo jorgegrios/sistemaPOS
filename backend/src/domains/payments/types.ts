@@ -14,6 +14,16 @@ export interface Payment {
   currency: string;
   createdAt: string;
   completedAt?: string;
+
+  // Fiscal Breakdown
+  subtotalAmount?: number;
+  taxAmount?: number;
+  serviceCharge?: number;
+  tipAmount?: number;
+
+  // Security/Receipt Info
+  maskedCard?: string;
+  transactionId?: string;
 }
 
 export interface CreatePaymentRequest {
@@ -21,6 +31,15 @@ export interface CreatePaymentRequest {
   method: PaymentMethod;
   amount: number;
   currency?: string;
+
+  // Fiscal Breakdown
+  subtotalAmount?: number;
+  taxAmount?: number;
+  serviceCharge?: number;
+  tipAmount?: number;
+
+  // PCI Token (for card payments)
+  paymentToken?: string;
 }
 
 export interface SplitPaymentRequest {
@@ -31,9 +50,3 @@ export interface SplitPaymentRequest {
   }>;
   currency?: string;
 }
-
-
-
-
-
-

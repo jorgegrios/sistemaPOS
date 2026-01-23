@@ -16,17 +16,19 @@ import { Pool } from 'pg';
  */
 export async function getActiveOrderForTable(
   pool: Pool,
-  tableId: string
+  tableId: string,
+  companyId: string
 ): Promise<string | null> {
   const result = await pool.query(
     `SELECT id FROM orders 
      WHERE table_id = $1 
+     AND company_id = $2
      AND status IN ('draft', 'sent_to_kitchen', 'served')
      ORDER BY created_at DESC
      LIMIT 1`,
-    [tableId]
+    [tableId, companyId]
   );
-  
+
   return result.rows.length > 0 ? result.rows[0].id : null;
 }
 
@@ -45,9 +47,9 @@ export async function isOrderSentToKitchen(
     `SELECT status FROM orders WHERE id = $1`,
     [orderId]
   );
-  
+
   if (result.rows.length === 0) return false;
-  
+
   const status = result.rows[0].status;
   return status === 'sent_to_kitchen' || status === 'served' || status === 'closed';
 }
@@ -70,9 +72,9 @@ export async function canCloseOrder(
      WHERE order_id = $1`,
     [orderId]
   );
-  
+
   if (result.rows.length === 0) return false;
-  
+
   const { total, served } = result.rows[0];
   return parseInt(total) > 0 && parseInt(total) === parseInt(served);
 }
@@ -95,7 +97,7 @@ export async function hasCompletedPayment(
      AND status = 'completed'`,
     [orderId]
   );
-  
+
   return parseInt(result.rows[0].count) > 0;
 }
 

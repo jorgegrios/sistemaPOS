@@ -23,7 +23,10 @@ router.get('/active-items', verifyToken, async (req: AuthRequest, res: Response)
       return res.status(403).json({ error: 'Only bartender staff can access this endpoint' });
     }
 
-    const items = await barService.getActiveItems();
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const items = await barService.getActiveItems(companyId);
     return res.json({ items });
   } catch (error: any) {
     console.error('[Bar] Error getting active items:', error);
@@ -42,7 +45,10 @@ router.get('/orders', verifyToken, async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Only bartender staff can access this endpoint' });
     }
 
-    const orders = await barService.getBarOrders();
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const orders = await barService.getBarOrders(companyId);
     return res.json({ orders });
   } catch (error: any) {
     console.error('[Bar] Error getting orders:', error);
@@ -62,7 +68,10 @@ router.get('/orders/:orderId/items', verifyToken, async (req: AuthRequest, res: 
     }
 
     const { orderId } = req.params;
-    const items = await barService.getItemsByOrder(orderId);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const items = await barService.getItemsByOrder(orderId, companyId);
     return res.json({ items });
   } catch (error: any) {
     console.error('[Bar] Error getting items by order:', error);
@@ -83,7 +92,10 @@ router.post('/items/:id/prepare', verifyToken, async (req: AuthRequest, res: Res
     }
 
     const { id } = req.params;
-    const item = await barService.markItemPrepared(id);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const item = await barService.markItemPrepared(id, companyId);
     return res.json(item);
   } catch (error: any) {
     if (error.message.includes('not found')) {
@@ -105,7 +117,10 @@ router.get('/served-orders', verifyToken, async (req: AuthRequest, res: Response
       return res.status(403).json({ error: 'Only bartender staff can access this endpoint' });
     }
 
-    const orders = await barService.getServedOrders();
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const orders = await barService.getServedOrders(companyId);
     return res.json({ orders });
   } catch (error: any) {
     console.error('[Bar] Error getting served orders:', error);

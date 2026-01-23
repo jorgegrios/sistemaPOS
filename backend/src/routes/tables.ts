@@ -16,11 +16,13 @@ const router = Router();
 router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const restaurantId = req.user?.restaurantId;
-    if (!restaurantId) {
-      return res.status(400).json({ error: 'Restaurant ID required' });
+    const companyId = req.user?.companyId;
+
+    if (!restaurantId || !companyId) {
+      return res.status(400).json({ error: 'Restaurant and Company ID required' });
     }
 
-    const tables = await tableService.getTables(restaurantId);
+    const tables = await tableService.getTables(restaurantId, companyId);
     return res.json({ tables });
   } catch (error: any) {
     console.error('[Tables] Error:', error);
@@ -35,10 +37,14 @@ router.get('/', verifyToken, async (req: AuthRequest, res: Response) => {
 router.get('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const table = await tableService.getTable(id);
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const table = await tableService.getTable(id, companyId);
 
     if (!table) {
-      return res.status(404).json({ error: 'Table not found' });
+      return res.status(404).json({ error: 'Table not found or unauthorized' });
     }
 
     return res.json({ table });
@@ -55,26 +61,22 @@ router.get('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
 router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const restaurantId = req.user?.restaurantId;
+    const companyId = req.user?.companyId;
     const { tableNumber, capacity } = req.body;
 
-    if (!restaurantId) {
-      return res.status(400).json({ error: 'Restaurant ID required' });
+    if (!restaurantId || !companyId) {
+      return res.status(400).json({ error: 'Restaurant and Company ID required' });
     }
 
     if (!tableNumber) {
       return res.status(400).json({ error: 'Table number is required' });
     }
 
-    if (!capacity || capacity < 1) {
-      return res.status(400).json({ error: 'Capacity must be at least 1' });
-    }
-
-    // Check if user is admin or manager
     if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
       return res.status(403).json({ error: 'Only admins and managers can create tables' });
     }
 
-    const table = await tableService.createTable(restaurantId, tableNumber, parseInt(capacity));
+    const table = await tableService.createTable(restaurantId, tableNumber, parseInt(capacity), companyId);
     return res.status(201).json({ table });
   } catch (error: any) {
     console.error('[Tables] Error:', error);
@@ -89,15 +91,18 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
 router.put('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const companyId = req.user?.companyId;
     const { tableNumber, capacity, status } = req.body;
 
-    // Check if user is admin or manager
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
       return res.status(403).json({ error: 'Only admins and managers can update tables' });
     }
 
     const table = await tableService.updateTable(
       id,
+      companyId,
       tableNumber,
       capacity ? parseInt(capacity) : undefined,
       status
@@ -106,9 +111,6 @@ router.put('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
     return res.json({ table });
   } catch (error: any) {
     console.error('[Tables] Error:', error);
-    if (error.message === 'Table not found') {
-      return res.status(404).json({ error: error.message });
-    }
     return res.status(500).json({ error: error.message });
   }
 });
@@ -119,18 +121,17 @@ router.put('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
  */
 router.delete('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    // Check if user is admin
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (req.user?.role !== 'admin') {
       return res.status(403).json({ error: 'Only admins can delete tables' });
     }
 
-    await tableService.deleteTable(req.params.id);
+    await tableService.deleteTable(req.params.id, companyId);
     return res.json({ ok: true });
   } catch (error: any) {
     console.error('[Tables] Error:', error);
-    if (error.message === 'Table not found') {
-      return res.status(404).json({ error: error.message });
-    }
     return res.status(500).json({ error: error.message });
   }
 });
