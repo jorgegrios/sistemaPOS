@@ -1,12 +1,10 @@
--- Reset Schema (DANGEROUS but necessary for dev iteration here)
+-- Reset Schema
 DROP SCHEMA IF EXISTS public CASCADE;
 
 CREATE SCHEMA public;
 
 GRANT ALL ON SCHEMA public TO public;
--- or pos_admin
 
--- Enable pgcrypto for UUIDs
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- 1. Companies
@@ -19,7 +17,34 @@ CREATE TABLE IF NOT EXISTS companies (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- 2. Tables
+-- 2. Restaurants (Required for Users)
+CREATE TABLE IF NOT EXISTS restaurants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    company_id UUID REFERENCES companies (id),
+    name VARCHAR(255) NOT NULL,
+    address TEXT,
+    phone VARCHAR(20),
+    email VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 3. Users (Required for Auth)
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    company_id UUID REFERENCES companies (id),
+    restaurant_id UUID REFERENCES restaurants (id),
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    role VARCHAR(50) DEFAULT 'waiter',
+    active BOOLEAN DEFAULT true,
+    phone VARCHAR(20),
+    permissions JSONB DEFAULT '{}',
+    last_login TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 4. Tables
 CREATE TABLE IF NOT EXISTS tables (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     company_id UUID REFERENCES companies (id),
@@ -28,24 +53,24 @@ CREATE TABLE IF NOT EXISTS tables (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- 3. Menu Items
+-- 5. Menu Items
 CREATE TABLE IF NOT EXISTS menu_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     company_id UUID REFERENCES companies (id),
     name VARCHAR(255) NOT NULL,
     price NUMERIC(10, 2) DEFAULT 0,
-    base_price NUMERIC(10, 2), -- Alias or specific field
+    base_price NUMERIC(10, 2),
     available BOOLEAN DEFAULT true,
     category_id UUID,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- 4. Orders
+-- 6. Orders
 CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     company_id UUID REFERENCES companies (id),
     table_id UUID REFERENCES tables (id),
-    waiter_id UUID,
+    waiter_id UUID, -- No FK constraint to simplify testing with random UUIDs if needed
     order_number VARCHAR(50),
     status VARCHAR(50) DEFAULT 'pending',
     payment_status VARCHAR(50) DEFAULT 'pending',
@@ -59,15 +84,15 @@ CREATE TABLE IF NOT EXISTS orders (
     paid_at TIMESTAMP
 );
 
--- 5. Order Items
+-- 7. Order Items
 CREATE TABLE IF NOT EXISTS order_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     order_id UUID REFERENCES orders (id),
     company_id UUID REFERENCES companies (id),
     product_id UUID REFERENCES menu_items (id),
-    menu_item_id UUID, -- distinct or alias?
-    name VARCHAR(255), -- Product name snapshot
-    price NUMERIC(10, 2) DEFAULT 0, -- price snapshot
+    menu_item_id UUID,
+    name VARCHAR(255),
+    price NUMERIC(10, 2) DEFAULT 0,
     quantity INTEGER DEFAULT 1,
     status VARCHAR(50) DEFAULT 'pending',
     notes TEXT,
@@ -76,7 +101,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     sent_at TIMESTAMP
 );
 
--- 6. Kitchen Stations
+-- 8. Kitchen Stations
 CREATE TABLE IF NOT EXISTS kitchen_stations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     company_id UUID REFERENCES companies (id),
@@ -86,7 +111,7 @@ CREATE TABLE IF NOT EXISTS kitchen_stations (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- 7. Product Components
+-- 9. Product Components
 CREATE TABLE IF NOT EXISTS product_components (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     product_id UUID REFERENCES menu_items (id),
@@ -95,7 +120,7 @@ CREATE TABLE IF NOT EXISTS product_components (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- 8. Kitchen Tasks
+-- 10. Kitchen Tasks
 CREATE TABLE IF NOT EXISTS kitchen_tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     order_item_id UUID REFERENCES order_items (id),
@@ -105,3 +130,31 @@ CREATE TABLE IF NOT EXISTS kitchen_tasks (
     created_at TIMESTAMP DEFAULT NOW(),
     completed_at TIMESTAMP
 );
+
+-- SEED DATA
+DO $$
+DECLARE
+    v_company_id UUID;
+    v_restaurant_id UUID;
+    v_user_id UUID;
+BEGIN
+    -- Create Company
+    INSERT INTO companies (name, slug) VALUES ('Test Company', 'default') RETURNING id INTO v_company_id;
+    
+    -- Create Restaurant
+    INSERT INTO restaurants (company_id, name, email) VALUES (v_company_id, 'Test Restaurant', 'contact@test.com') RETURNING id INTO v_restaurant_id;
+
+    -- Create Admin User
+    -- Use hash: $2b$10$JftzsNvK1mNI9OmOi/l8a.68AtzS90bh58uVKBYRaQIrlcUVLByse
+    INSERT INTO users (company_id, restaurant_id, email, password_hash, name, role)
+    VALUES (
+        v_company_id, 
+        v_restaurant_id, 
+        'admin@test.com', 
+        '$2b$10$JftzsNvK1mNI9OmOi/l8a.68AtzS90bh58uVKBYRaQIrlcUVLByse', 
+        'Admin User', 
+        'admin'
+    );
+    
+    RAISE NOTICE 'Seeded Company ID: %, Restaurant ID: %, User: admin@test.com', v_company_id, v_restaurant_id;
+END $$;
