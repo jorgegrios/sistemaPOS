@@ -35,14 +35,18 @@ exports.verifyToken = verifyToken;
  */
 router.post('/login', async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, companySlug } = req.body;
         if (!email || !password) {
             return res.status(400).json({ error: 'Email and password required' });
         }
-        // Find user
-        const result = await pool.query('SELECT id, email, password_hash, name, role, restaurant_id, active FROM users WHERE email = $1', [email]);
+        const slug = companySlug || 'default';
+        // Find user with company context
+        const result = await pool.query(`SELECT u.id, u.email, u.password_hash, u.name, u.role, u.restaurant_id, u.company_id, u.active 
+       FROM users u
+       JOIN companies c ON u.company_id = c.id
+       WHERE u.email = $1 AND c.slug = $2`, [email, slug]);
         if (result.rows.length === 0) {
-            return res.status(401).json({ error: 'Invalid credentials' });
+            return res.status(401).json({ error: 'Invalid credentials or company' });
         }
         const user = result.rows[0];
         if (!user.active) {
@@ -59,8 +63,21 @@ router.post('/login', async (req, res) => {
             email: user.email,
             name: user.name,
             role: user.role,
-            restaurantId: user.restaurant_id
+            restaurantId: user.restaurant_id,
+            companyId: user.company_id
         }, JWT_SECRET, { expiresIn: '24h' });
+        // Get company session timeout setting (optional - handles migration not run yet)
+        let sessionTimeoutMinutes = 20; // Default
+        try {
+            const companyResult = await pool.query('SELECT session_timeout_minutes FROM companies WHERE id = $1', [user.company_id]);
+            if (companyResult.rows[0]?.session_timeout_minutes) {
+                sessionTimeoutMinutes = companyResult.rows[0].session_timeout_minutes;
+            }
+        }
+        catch (error) {
+            // Column doesn't exist yet - use default
+            console.log('[Auth] session_timeout_minutes column not found, using default 20 minutes');
+        }
         // Update last_login
         await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
         return res.json({
@@ -70,8 +87,10 @@ router.post('/login', async (req, res) => {
                 email: user.email,
                 name: user.name,
                 role: user.role,
-                restaurantId: user.restaurant_id
-            }
+                restaurantId: user.restaurant_id,
+                companyId: user.company_id
+            },
+            sessionTimeoutMinutes
         });
     }
     catch (error) {

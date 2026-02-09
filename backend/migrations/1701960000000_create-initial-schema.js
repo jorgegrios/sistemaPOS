@@ -6,7 +6,7 @@ exports.shapeValue = (value) => {
 
 exports.up = (pgm) => {
   // Enable pgcrypto extension
-  pgm.createExtension('pgcrypto', { ifNotExists: true });
+  // pgm.createExtension('pgcrypto', { ifNotExists: true });
 
   // Create payment_transactions table
   pgm.createTable('payment_transactions', {

@@ -38,6 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config(); // ← MOVER AQUÍ, ANTES DE TODO
+// Config reload trigger: 2026-01-24
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
@@ -115,7 +116,7 @@ const corsOptions = {
     },
     credentials: true, // Permitir cookies y headers de autenticación
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Restaurant-ID', 'x-restaurant-id', 'X-Company-ID', 'x-company-id'],
     exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page']
 };
 app.use((0, cors_1.default)(corsOptions));
@@ -248,12 +249,13 @@ const cashierDomainService = new service_3.CashierDomainService(db_1.pool);
         console.error('[Event] Error handling ORDER_CREATED:', error);
     }
 });
-// Listen for order closed - free table
+// Listen for order closed - mark table as paid (it stays occupied by customers but bill is done)
 (0, events_1.onEvent)(events_1.DomainEventType.ORDER_CLOSED, async (payload) => {
     try {
         const { tableId } = payload;
         if (tableId) {
-            await tablesService.freeTable(tableId);
+            await tablesService.markAsPaid(tableId);
+            console.log(`[Event] Table ${tableId} marked as PAID after order closure`);
         }
     }
     catch (error) {
@@ -319,7 +321,8 @@ const cashierDomainService = new service_3.CashierDomainService(db_1.pool);
         const { orderId } = payload;
         // Check if order can be closed (all items served and payment completed)
         try {
-            await ordersService.closeOrder(orderId);
+            const { companyId } = payload;
+            await ordersService.closeOrder(orderId, companyId);
             console.log(`[Event] Order ${orderId} closed after payment completion`);
             // Update cash session expected balance if it was a cash payment
             const { method, amount, restaurantId } = payload;

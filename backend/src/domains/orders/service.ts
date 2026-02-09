@@ -194,6 +194,104 @@ export class OrdersService {
       throw new Error(`Cannot send order to kitchen with status: ${order.status}`);
     }
 
+    // Generate kitchen tasks for items
+    // Logic:
+    // 1. Check if item has components (split item)
+    // 2. If not, check if product has a specific station
+    // 3. If not, assign to default station
+
+    // Get all items that need tasks (status 'pending')
+    const itemsPending = await this.pool.query(
+      `SELECT oi.id, oi.product_id, oi.name, oi.menu_item_id
+       FROM order_items oi
+       WHERE oi.order_id = $1 AND oi.status = 'pending'`,
+      [orderId]
+    );
+
+    for (const item of itemsPending.rows) {
+      const productId = item.product_id || item.menu_item_id;
+
+      // 1. Check for components
+      const componentsResult = await this.pool.query(
+        `SELECT pc.id, pc.station_id, pc.component_name as name, kstation.name as station_name
+             FROM product_components pc
+             JOIN kitchen_stations kstation ON pc.station_id = kstation.id
+             WHERE pc.product_id = $1`,
+        [productId]
+      );
+
+      if (componentsResult.rows.length > 0) {
+        // Create a task for each component
+        for (const component of componentsResult.rows) {
+          await this.pool.query(
+            `INSERT INTO kitchen_tasks (id, order_item_id, station_id, component_name, status)
+                     VALUES (gen_random_uuid(), $1, $2, $3, 'pending')`,
+            [item.id, component.station_id, component.name]
+          );
+        }
+      } else {
+        // 2. Check for default station or assign to "General"
+        // For now, we'll try to find a default station or create one if it doesn't exist
+        // TODO: In a real app, we should look up the product's assigned station
+
+        // Get default station
+        let stationResult = await this.pool.query(
+          `SELECT id FROM kitchen_stations WHERE company_id = $1 AND is_default = true LIMIT 1`,
+          [companyId]
+        );
+
+        let stationId;
+        if (stationResult.rows.length === 0) {
+          // Determine station based on category metadata (migration path)
+          // This preserves existing logic: "Bar" vs "Kitchen"
+          const itemMetadataResult = await this.pool.query(
+            `SELECT mc.metadata, mc.name
+                     FROM menu_items mi
+                     LEFT JOIN menu_categories mc ON mi.category_id = mc.id
+                     WHERE mi.id = $1`,
+            [productId]
+          );
+
+          const metadata = itemMetadataResult.rows[0]?.metadata || {};
+          const categoryName = (itemMetadataResult.rows[0]?.name || '').toLowerCase();
+
+          const isBar =
+            metadata.type === 'bar' ||
+            metadata.location === 'bar' ||
+            categoryName.includes('bebida') ||
+            categoryName.includes('bar');
+
+          const stationName = isBar ? 'Bar' : 'Cocina';
+
+          // Find or create this station
+          const findStation = await this.pool.query(
+            `SELECT id FROM kitchen_stations WHERE company_id = $1 AND name = $2`,
+            [companyId, stationName]
+          );
+
+          if (findStation.rows.length > 0) {
+            stationId = findStation.rows[0].id;
+          } else {
+            const createStation = await this.pool.query(
+              `INSERT INTO kitchen_stations (company_id, name, is_default)
+                         VALUES ($1, $2, $3) RETURNING id`,
+              [companyId, stationName, !isBar] // Make Kitchen default
+            );
+            stationId = createStation.rows[0].id;
+          }
+        } else {
+          stationId = stationResult.rows[0].id;
+        }
+
+        // Create single task for the item
+        await this.pool.query(
+          `INSERT INTO kitchen_tasks (id, order_item_id, station_id, component_name, status)
+                 VALUES (gen_random_uuid(), $1, $2, $3, 'pending')`,
+          [item.id, stationId, item.name || 'Item']
+        );
+      }
+    }
+
     // Change all 'pending' order items status to 'sent'
     const updateResult = await this.pool.query(
       `UPDATE order_items 
@@ -223,6 +321,7 @@ export class OrdersService {
     }
 
     // Only emit event if something actually changed
+    // We should probably emit an event about tasks created as well
     if (updatedItemCount > 0 || order.status === 'draft') {
       const items = await this.getOrderItems(orderId, companyId);
 

@@ -6,7 +6,7 @@
  */
 
 import { Pool } from 'pg';
-import { KitchenOrderItem, KitchenOrder } from './types';
+import { KitchenOrderItem, KitchenOrder, KitchenTask, KitchenStation } from './types';
 import { emitEvent, DomainEventType } from '../../shared/events';
 import { canCloseOrder } from '../../shared/idempotency';
 
@@ -14,104 +14,104 @@ export class KitchenService {
   constructor(private pool: Pool) { }
 
   /**
-   * Get Active Kitchen Items
-   * RULE: Only show items with status = 'sent' or 'prepared'
-   * @param station The production station to filter by ('kitchen', 'bar', or undefined for all)
+   * Get Active Kitchen Items (Tasks)
+   * RULE: Show kitchen_tasks with status = 'pending' or 'sent' or 'prepared'
+   * @param stationId The station UUID to filter by
    */
-  async getActiveItems(companyId: string, station?: 'kitchen' | 'bar'): Promise<KitchenOrderItem[]> {
-    // Obtener todos los items activos y filtrar por categoría en memoria
-    // Esto es más confiable que filtrar en SQL con múltiples condiciones
-    const result = await this.pool.query(
-      `SELECT 
-        oi.id,
+  async getActiveItems(companyId: string, stationId?: string): Promise<KitchenOrderItem[]> {
+    // If no stationId provided, return nothing or all? 
+    // For KDS we usually want a specific station.
+
+    let query = `
+       SELECT 
+        kt.id as task_id,
+        kt.component_name,
+        kt.status as task_status,
+        kt.created_at as task_created_at,
+        station.name as station_name,
+        station.id as station_id,
+        oi.id as item_id,
         oi.order_id,
         COALESCE(oi.product_id, oi.menu_item_id) as product_id,
         COALESCE(oi.name, mi.name) as product_name,
         oi.quantity,
-        oi.status,
+        oi.status as item_status,
         oi.notes,
         oi.seat_number,
         COALESCE(t.name, t.table_number::text) as table_number,
         COALESCE(o.order_number, 'N/A') as order_number,
-        oi.created_at,
-        o.sent_to_kitchen_at as sent_at,
-        mc.id as category_id,
-        mc.name as category_name,
-        COALESCE(mc.metadata, '{}'::jsonb) as category_metadata
-       FROM order_items oi
+        oi.created_at as item_created_at,
+        o.sent_to_kitchen_at as sent_at
+       FROM kitchen_tasks kt
+       INNER JOIN order_items oi ON kt.order_item_id = oi.id
        INNER JOIN orders o ON oi.order_id = o.id
+       INNER JOIN kitchen_stations station ON kt.station_id = station.id
        LEFT JOIN tables t ON o.table_id = t.id
-       LEFT JOIN menu_items mi ON (
-         COALESCE(oi.product_id, oi.menu_item_id) = mi.id
-       )
-       LEFT JOIN menu_categories mc ON mi.category_id = mc.id
-       WHERE oi.status IN ('sent', 'prepared')
-       AND o.status IN ('sent_to_kitchen', 'served')
+       LEFT JOIN menu_items mi ON (COALESCE(oi.product_id, oi.menu_item_id) = mi.id)
+       WHERE kt.status IN ('pending', 'sent', 'prepared')
        AND o.company_id = $1
-       ORDER BY o.sent_to_kitchen_at ASC, o.order_number ASC`,
-      [companyId]
-    );
+    `;
 
-    // DEBUG: Log para verificar qué items se están obteniendo
-    console.log('[Kitchen] Total items obtenidos de BD (antes de filtrar):', result.rows.length);
-    if (result.rows.length > 0) {
-      console.log('[Kitchen] Primer item sample:', {
-        id: result.rows[0].id,
-        status: result.rows[0].status,
-        product_name: result.rows[0].product_name,
-        category_name: result.rows[0].category_name,
-        category_metadata: result.rows[0].category_metadata,
-        product_id: result.rows[0].product_id
+    const params: any[] = [companyId];
+
+    if (stationId) {
+      query += ` AND kt.station_id = $2`;
+      params.push(stationId);
+    }
+
+    query += ` ORDER BY o.sent_to_kitchen_at ASC, o.order_number ASC`;
+
+    // DEBUG
+    console.log('DEBUG: getActiveItems Query:', query);
+    console.log('DEBUG: Running from:', __filename);
+
+    const result = await this.pool.query(query, params);
+
+    // Group tasks by order item to return KitchenOrderItem structure
+    // But conceptually, KDS might want to show Tasks individually if they are separate components
+    // However, the interface returns KitchenOrderItem.
+    // Let's allow returning the same Item multiple times if it has multiple tasks for this station?
+    // Or return Items with a list of tasks?
+    // The previous interface returned OrderItems. 
+
+    // Proposal: Return "KitchenOrderItem" but adapted.
+    // Actually, for the Station View, we see "Carne - Termino Medio" as one card.
+
+    // Let's Group by Item ID, but filtering tasks for this station.
+    const itemsMap = new Map<string, KitchenOrderItem>();
+
+    for (const row of result.rows) {
+      if (!itemsMap.has(row.item_id)) {
+        itemsMap.set(row.item_id, {
+          id: row.item_id,
+          orderId: row.order_id,
+          productId: row.product_id,
+          productName: row.product_name,
+          quantity: row.quantity,
+          status: row.item_status, // aggregate status
+          notes: row.notes,
+          seatNumber: row.seat_number,
+          tableNumber: row.table_number,
+          orderNumber: row.order_number,
+          createdAt: row.item_created_at.toISOString(),
+          sentAt: row.sent_at ? new Date(row.sent_at).toISOString() : new Date().toISOString(),
+          tasks: [] // Initialize tasks array
+        });
+      }
+
+      const item = itemsMap.get(row.item_id)!;
+      item.tasks?.push({
+        id: row.task_id,
+        orderItemId: row.item_id,
+        stationId: row.station_id,
+        stationName: row.station_name,
+        componentName: row.component_name,
+        status: row.task_status,
+        createdAt: row.task_created_at.toISOString()
       });
     }
 
-    // Filtrar items de bar en memoria (más confiable)
-    const kitchenItems = result.rows.filter(row => {
-      // Si no hay categoría, asumir que es de cocina (por defecto)
-      if (!row.category_id || !row.category_name) {
-        return true;
-      }
-
-      // Parsear metadata - PostgreSQL devuelve JSONB como objeto o string
-      let metadata: any = {};
-      if (row.category_metadata) {
-        if (typeof row.category_metadata === 'string') {
-          try {
-            metadata = JSON.parse(row.category_metadata);
-          } catch (e) {
-            metadata = {};
-          }
-        } else {
-          metadata = row.category_metadata;
-        }
-      }
-
-      const categoryType = (metadata?.type || metadata?.location || '') as string;
-      const categoryName = ((row.category_name || '') as string).toLowerCase();
-
-      // Excluir categorías de bar/bebidas
-      const isBarCategory =
-        categoryType === 'bar' ||
-        categoryType === 'drinks' ||
-        categoryName.includes('bebida') ||
-        categoryName.includes('bar') ||
-        categoryName.includes('cocktail') ||
-        categoryName.includes('coctel') ||
-        categoryName === 'cocteles' ||
-        categoryName.includes('licores') ||
-        categoryName.includes('cerveza') ||
-        categoryName.includes('vino');
-
-      if (station === 'bar') {
-        return isBarCategory;
-      } else if (station === 'kitchen') {
-        return !isBarCategory;
-      }
-
-      return true; // Si no hay station especificada, devolver todo
-    });
-
-    return kitchenItems.map(row => this.mapRowToKitchenOrderItem(row));
+    return Array.from(itemsMap.values());
   }
 
   /**
@@ -250,80 +250,111 @@ export class KitchenService {
   }
 
   /**
-   * Mark Order Item as Prepared
-   * RULE: Only mark items with status = 'sent' as 'prepared'
+   * Mark Kitchen Task as Prepared
+   * RULE: Mark specific task as prepared.
+   * Check if all tasks for the order item are prepared -> update order item.
+   * Check if all items for the order are prepared -> update order.
    */
-  async markItemPrepared(orderItemId: string, companyId: string): Promise<KitchenOrderItem> {
-    // Verify item exists and is in 'sent' status
-    const itemResult = await this.pool.query(
-      `SELECT oi.id, oi.order_id, oi.status
-       FROM order_items oi
-       INNER JOIN orders o ON oi.order_id = o.id
-       WHERE oi.id = $1 AND o.company_id = $2`,
-      [orderItemId, companyId]
+  async markTaskPrepared(taskId: string, companyId: string): Promise<KitchenTask> {
+    // 1. Get task and verify status
+    const taskResult = await this.pool.query(
+      `SELECT kt.id, kt.order_item_id, kt.status, kt.station_id, o.id as order_id
+         FROM kitchen_tasks kt
+         JOIN order_items oi ON kt.order_item_id = oi.id
+         JOIN orders o ON oi.order_id = o.id
+         WHERE kt.id = $1 AND o.company_id = $2`,
+      [taskId, companyId]
     );
 
-    if (itemResult.rows.length === 0) {
-      throw new Error(`Order item ${orderItemId} not found`);
+    if (taskResult.rows.length === 0) {
+      throw new Error(`Task ${taskId} not found`);
     }
 
-    const item = itemResult.rows[0];
+    const task = taskResult.rows[0];
 
-    if (item.status !== 'sent') {
-      throw new Error(`Cannot mark item as prepared: current status is ${item.status}`);
-    }
-
-    // Update item status to 'prepared'
+    // Update task status
     await this.pool.query(
-      `UPDATE order_items SET status = 'prepared' WHERE id = $1`,
+      `UPDATE kitchen_tasks SET status = 'prepared', completed_at = NOW() WHERE id = $1`,
+      [taskId]
+    );
+
+    // 2. Check parent Order Item
+    // Are all tasks for this item prepared?
+    const itemTasksResult = await this.pool.query(
+      `SELECT count(*) as total,
+                SUM(CASE WHEN status = 'prepared' OR status = 'served' THEN 1 ELSE 0 END) as completed
+         FROM kitchen_tasks
+         WHERE order_item_id = $1`,
+      [task.order_item_id]
+    );
+
+    const { total, completed } = itemTasksResult.rows[0];
+
+    if (parseInt(total) > 0 && parseInt(total) === parseInt(completed)) {
+      // All tasks done, mark item as prepared
+      await this.pool.query(
+        `UPDATE order_items SET status = 'prepared' WHERE id = $1`,
+        [task.order_item_id]
+      );
+
+      // Emit item prepared event
+      emitEvent(DomainEventType.ORDER_ITEM_PREPARED, {
+        orderId: task.order_id,
+        orderItemId: task.order_item_id,
+      } as any);
+    }
+
+    // Return updated task info
+    // Fetch full task details
+    const updatedTaskResult = await this.pool.query(
+      `SELECT kt.id, kt.order_item_id as orderItemId, kt.station_id as stationId, 
+                ks.name as stationName, kt.component_name as componentName, 
+                kt.status, kt.created_at as createdAt, kt.completed_at as completedAt
+         FROM kitchen_tasks kt
+         JOIN kitchen_stations ks ON kt.station_id = ks.id
+         WHERE kt.id = $1`,
+      [taskId]
+    );
+
+    // Check order level is handled by separate logic or re-checked here?
+    // Existing logic had a check for "All Kitchen Items".
+    // We can keep specific logic separate or trigger it.
+
+    return {
+      id: updatedTaskResult.rows[0].id,
+      orderItemId: updatedTaskResult.rows[0].orderitemid,
+      stationId: updatedTaskResult.rows[0].stationid,
+      stationName: updatedTaskResult.rows[0].stationname,
+      componentName: updatedTaskResult.rows[0].componentname,
+      status: updatedTaskResult.rows[0].status,
+      createdAt: updatedTaskResult.rows[0].createdat.toISOString(),
+      completedAt: updatedTaskResult.rows[0].completedat?.toISOString()
+    };
+  }
+
+  // Legacy method kept for compatibility but should be deprecated or adapted
+  async markItemPrepared(orderItemId: string, companyId: string): Promise<KitchenOrderItem> {
+    // NOTE: This logic assumes we are marking the WHOLE item.
+    // If we have tasks, we should force using markTaskPrepared.
+    // Or we mark ALL tasks as prepared.
+
+    // For now, let's auto-complete all tasks for this item
+    const tasks = await this.pool.query(
+      `SELECT id FROM kitchen_tasks WHERE order_item_id = $1 AND status != 'prepared'`,
       [orderItemId]
     );
 
-    // Get updated item
-    const updatedItems = await this.getItemsByOrder(item.order_id, companyId);
-    const updatedItem = updatedItems.find(i => i.id === orderItemId);
-
-    if (!updatedItem) {
-      throw new Error(`Failed to get updated item ${orderItemId}`);
+    for (const row of tasks.rows) {
+      await this.markTaskPrepared(row.id, companyId);
     }
 
-    // Check if all KITCHEN items in order are prepared (not bar items)
-    // Only check kitchen items to avoid marking order as served if bar items are still pending
-    const allKitchenItemsResult = await this.pool.query(
-      `SELECT COUNT(*) as total, 
-              SUM(CASE WHEN status = 'prepared' THEN 1 ELSE 0 END) as prepared,
-              SUM(CASE WHEN status = 'served' THEN 1 ELSE 0 END) as served
-       FROM order_items oi
-       INNER JOIN menu_items mi ON (COALESCE(oi.product_id, oi.menu_item_id) = mi.id)
-       LEFT JOIN menu_categories mc ON mi.category_id = mc.id
-       WHERE oi.order_id = $1
-       AND (
-         mc.id IS NULL 
-         OR (
-           COALESCE(mc.metadata->>'type', '') NOT IN ('bar', 'drinks')
-           AND COALESCE(mc.metadata->>'location', '') != 'bar'
-           AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%bebida%'
-           AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%bar%'
-           AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%cocktail%'
-           AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%coctel%'
-           AND LOWER(COALESCE(mc.name, '')) != 'cocteles'
-         )
-       )`,
-      [item.order_id]
+    // Return updated item
+    const items = await this.getItemsByOrder(
+      (await this.pool.query('SELECT order_id FROM order_items WHERE id = $1', [orderItemId])).rows[0].order_id,
+      companyId
     );
 
-    const { total, prepared, served } = allKitchenItemsResult.rows[0];
-    const totalInt = parseInt(total);
-    const preparedInt = parseInt(prepared);
-    const servedInt = parseInt(served);
-
-    // Emit event
-    emitEvent(DomainEventType.ORDER_ITEM_PREPARED, {
-      orderId: item.order_id,
-      orderItemId,
-    } as any);
-
-    return updatedItem;
+    return items.find(i => i.id === orderItemId)!;
   }
 
   /**
@@ -623,6 +654,33 @@ export class KitchenService {
       createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
       sentAt: row.sent_at ? new Date(row.sent_at).toISOString() : new Date().toISOString(),
     };
+  }
+
+  /**
+   * Get All Kitchen Stations
+   */
+  async getStations(companyId: string): Promise<KitchenStation[]> {
+    const result = await this.pool.query(
+      `SELECT id, name, is_default 
+       FROM kitchen_stations 
+       WHERE company_id = $1 
+       ORDER BY name ASC`,
+      [companyId]
+    );
+
+    // If no stations exist, return default ones for UI to show (compatibility)
+    if (result.rows.length === 0) {
+      return [
+        { id: 'kitchen', name: 'Cocina', isDefault: true },
+        { id: 'bar', name: 'Bar', isDefault: false }
+      ];
+    }
+
+    return result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      isDefault: row.is_default
+    }));
   }
 }
 

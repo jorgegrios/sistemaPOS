@@ -10,18 +10,21 @@ const pool = new pg_1.Pool({ connectionString: process.env.DATABASE_URL });
  * GET /api/v1/menus/:restaurantId
  * Get all menus for a restaurant
  */
-router.get('/:restaurantId', async (req, res) => {
+router.get('/:restaurantId', auth_1.verifyToken, async (req, res) => {
     try {
         const { restaurantId } = req.params;
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
         const result = await pool.query(`SELECT m.id, m.name, m.description, 
         COUNT(DISTINCT mc.id) as category_count,
         COUNT(DISTINCT mi.id) as item_count
        FROM menus m
        LEFT JOIN menu_categories mc ON m.id = mc.menu_id
        LEFT JOIN menu_items mi ON mc.id = mi.category_id
-       WHERE m.restaurant_id = $1 AND m.active = true
+       WHERE m.restaurant_id = $1 AND m.company_id = $2 AND m.active = true
        GROUP BY m.id
-       ORDER BY m.created_at`, [restaurantId]);
+       ORDER BY m.created_at`, [restaurantId, companyId]);
         return res.json({
             menus: result.rows.map(row => ({
                 id: row.id,
@@ -41,16 +44,19 @@ router.get('/:restaurantId', async (req, res) => {
  * GET /api/v1/menus/:restaurantId/:menuId
  * Get menu with categories and items
  */
-router.get('/:restaurantId/:menuId', async (req, res) => {
+router.get('/:restaurantId/:menuId', auth_1.verifyToken, async (req, res) => {
     try {
         const { restaurantId, menuId } = req.params;
-        // Get menu
-        const menuResult = await pool.query('SELECT * FROM menus WHERE id = $1 AND restaurant_id = $2', [menuId, restaurantId]);
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
+        // Get menu with company check
+        const menuResult = await pool.query('SELECT * FROM menus WHERE id = $1 AND restaurant_id = $2 AND company_id = $3', [menuId, restaurantId, companyId]);
         if (menuResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Menu not found' });
+            return res.status(404).json({ error: 'Menu not found or unauthorized' });
         }
         const menu = menuResult.rows[0];
-        // Get categories with items and metadata
+        // Get categories with items (isolation ensured by menuId check)
         const categoriesResult = await pool.query(`SELECT mc.id, mc.name, mc.display_order, COALESCE(mc.metadata, '{}'::jsonb) as metadata,
         json_agg(json_build_object(
           'id', mi.id,
@@ -76,10 +82,10 @@ router.get('/:restaurantId/:menuId', async (req, res) => {
                 name: row.name,
                 displayOrder: row.display_order,
                 metadata: row.metadata || {},
-                items: row.items.filter((i) => i.id !== null).map((item) => ({
+                items: (row.items || []).filter((i) => i.id !== null).map((item) => ({
                     ...item,
                     metadata: item.metadata || {}
-                })) // Filter out null items and ensure metadata exists
+                }))
             }))
         });
     }
@@ -96,12 +102,14 @@ router.post('/:restaurantId', auth_1.verifyToken, async (req, res) => {
     try {
         const { restaurantId } = req.params;
         const { name, description } = req.body;
-        if (!name) {
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
+        if (!name)
             return res.status(400).json({ error: 'Menu name is required' });
-        }
         const menuId = (0, uuid_1.v4)();
-        await pool.query(`INSERT INTO menus (id, restaurant_id, name, description, active)
-       VALUES ($1, $2, $3, $4, true)`, [menuId, restaurantId, name, description || null]);
+        await pool.query(`INSERT INTO menus (id, restaurant_id, company_id, name, description, active)
+       VALUES ($1, $2, $3, $4, $5, true)`, [menuId, restaurantId, companyId, name, description || null]);
         return res.status(201).json({
             id: menuId,
             restaurantId,
@@ -121,12 +129,12 @@ router.post('/:restaurantId', auth_1.verifyToken, async (req, res) => {
 router.post('/categories', auth_1.verifyToken, async (req, res) => {
     try {
         const { menuId, name, displayOrder } = req.body;
-        if (!menuId || !name) {
-            return res.status(400).json({ error: 'Menu ID and category name are required' });
-        }
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
         const categoryId = (0, uuid_1.v4)();
-        await pool.query(`INSERT INTO menu_categories (id, menu_id, name, display_order)
-       VALUES ($1, $2, $3, $4)`, [categoryId, menuId, name, displayOrder || 0]);
+        await pool.query(`INSERT INTO menu_categories (id, menu_id, company_id, name, display_order)
+       VALUES ($1, $2, $3, $4, $5)`, [categoryId, menuId, companyId, name, displayOrder || 0]);
         return res.status(201).json({
             id: categoryId,
             menuId,
@@ -163,8 +171,12 @@ router.put('/categories/:id', auth_1.verifyToken, async (req, res) => {
         if (updates.length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
         }
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
         params.push(id);
-        const result = await pool.query(`UPDATE menu_categories SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`, params);
+        params.push(companyId);
+        const result = await pool.query(`UPDATE menu_categories SET ${updates.join(', ')} WHERE id = $${paramCount} AND company_id = $${paramCount + 1} RETURNING *`, params);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Category not found' });
         }
@@ -187,7 +199,10 @@ router.put('/categories/:id', auth_1.verifyToken, async (req, res) => {
 router.delete('/categories/:id', auth_1.verifyToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('DELETE FROM menu_categories WHERE id = $1 RETURNING id', [id]);
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
+        const result = await pool.query('DELETE FROM menu_categories WHERE id = $1 AND company_id = $2 RETURNING id', [id, companyId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Category not found' });
         }
@@ -205,15 +220,16 @@ router.delete('/categories/:id', auth_1.verifyToken, async (req, res) => {
 router.post('/items', auth_1.verifyToken, async (req, res) => {
     try {
         const { categoryId, name, description, price, imageUrl, available, metadata } = req.body;
-        if (!categoryId || !name || price === undefined) {
-            return res.status(400).json({ error: 'Missing required fields' });
-        }
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
         const itemId = (0, uuid_1.v4)();
         // Preparar metadata (ingredientes, imagen, etc.)
         const metadataJson = metadata || (imageUrl ? { imageUrl } : null);
-        await pool.query(`INSERT INTO menu_items (id, category_id, name, description, price, base_price, image_url, available, metadata)
-       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)`, [
+        await pool.query(`INSERT INTO menu_items (id, company_id, category_id, name, description, price, base_price, image_url, available, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9)`, [
             itemId,
+            companyId,
             categoryId,
             name,
             description || null,
@@ -308,8 +324,12 @@ router.put('/items/:id', auth_1.verifyToken, async (req, res) => {
         if (updates.length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
         }
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
         params.push(id);
-        const result = await pool.query(`UPDATE menu_items SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`, params);
+        params.push(companyId);
+        const result = await pool.query(`UPDATE menu_items SET ${updates.join(', ')} WHERE id = $${paramCount} AND company_id = $${paramCount + 1} RETURNING *`, params);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Item not found' });
         }
@@ -335,7 +355,10 @@ router.put('/items/:id', auth_1.verifyToken, async (req, res) => {
 router.delete('/items/:id', auth_1.verifyToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('DELETE FROM menu_items WHERE id = $1 RETURNING id', [id]);
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
+        const result = await pool.query('DELETE FROM menu_items WHERE id = $1 AND company_id = $2 RETURNING id', [id, companyId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Item not found' });
         }

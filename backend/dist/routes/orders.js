@@ -70,11 +70,11 @@ router.post('/', async (req, res) => {
 router.get('/', auth_1.verifyToken, async (req, res) => {
     try {
         const restaurantId = req.user?.restaurantId;
-        if (!restaurantId) {
-            return res.status(400).json({ error: 'Restaurant ID required' });
+        const companyId = req.user?.companyId;
+        if (!restaurantId || !companyId) {
+            return res.status(400).json({ error: 'Restaurant and Company ID required' });
         }
         const { status, limit = 50, offset = 0 } = req.query;
-        // Mapear estados del frontend a estados de la base de datos
         const statusMap = {
             'pending': ['draft', 'pending', 'sent_to_kitchen'],
             'completed': ['completed', 'served', 'closed'],
@@ -84,10 +84,10 @@ router.get('/', auth_1.verifyToken, async (req, res) => {
       SELECT o.*, t.table_number, t.name as table_name
       FROM orders o
       LEFT JOIN tables t ON o.table_id = t.id
-      WHERE t.restaurant_id = $1
+      WHERE o.company_id = $1 AND t.restaurant_id = $2
     `;
-        const params = [restaurantId];
-        let paramIndex = 2;
+        const params = [companyId, restaurantId];
+        let paramIndex = 3;
         if (status && statusMap[status]) {
             const statuses = statusMap[status];
             query += ` AND o.status = ANY($${paramIndex})`;
@@ -96,13 +96,9 @@ router.get('/', auth_1.verifyToken, async (req, res) => {
         }
         query += ` ORDER BY o.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
         params.push(parseInt(limit), parseInt(offset));
-        console.log('[Orders] Query:', query);
-        console.log('[Orders] Params:', params);
         const result = await pool.query(query, params);
-        // Obtener items para cada orden
         const ordersWithItems = await Promise.all(result.rows.map(async (row) => {
             const itemsResult = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [row.id]);
-            // Mapear el estado de la BD al estado del frontend
             let frontendStatus = row.status;
             if (statusMap.pending.includes(row.status)) {
                 frontendStatus = 'pending';
@@ -120,42 +116,20 @@ router.get('/', auth_1.verifyToken, async (req, res) => {
                 paymentStatus: row.payment_status,
                 subtotal: parseFloat(row.subtotal),
                 tax: parseFloat(row.tax),
-                tip: parseFloat(row.tip || 0),
-                discount: parseFloat(row.discount || 0),
                 total: parseFloat(row.total),
                 createdAt: row.created_at,
-                paidAt: row.paid_at,
                 tableId: row.table_id,
                 tableNumber: row.table_number || row.table_name,
+                companyId: row.company_id,
                 items: itemsResult.rows.map(item => ({
                     id: item.id,
                     name: item.name,
                     price: parseFloat(item.price),
-                    quantity: item.quantity,
-                    notes: item.notes
+                    quantity: item.quantity
                 }))
             };
         }));
-        // Obtener el total de órdenes (sin límite)
-        const countQuery = `
-      SELECT COUNT(*) as total
-      FROM orders o
-      LEFT JOIN tables t ON o.table_id = t.id
-      WHERE t.restaurant_id = $1
-      ${status && statusMap[status] ? `AND o.status = ANY($2)` : ''}
-    `;
-        const countParams = [restaurantId];
-        if (status && statusMap[status]) {
-            countParams.push(statusMap[status]);
-        }
-        const countResult = await pool.query(countQuery, countParams);
-        const total = parseInt(countResult.rows[0].total);
-        console.log('[Orders] Returning', ordersWithItems.length, 'orders (total:', total, ')');
-        return res.json({
-            orders: ordersWithItems,
-            total: total,
-            count: ordersWithItems.length
-        });
+        return res.json({ orders: ordersWithItems });
     }
     catch (error) {
         console.error('[Orders] Error listing orders:', error);
@@ -166,16 +140,18 @@ router.get('/', auth_1.verifyToken, async (req, res) => {
  * GET /api/v1/orders/:id
  * Get order details with items
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', auth_1.verifyToken, async (req, res) => {
     try {
         const { id } = req.params;
-        // Get order
-        const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
+        // Get order with company filter
+        const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1 AND company_id = $2', [id, companyId]);
         if (orderResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Order not found' });
+            return res.status(404).json({ error: 'Order not found or unauthorized' });
         }
         const order = orderResult.rows[0];
-        // Get items
         const itemsResult = await pool.query(`SELECT oi.*, mi.description as item_description
        FROM order_items oi
        LEFT JOIN menu_items mi ON oi.menu_item_id = mi.id
@@ -185,25 +161,20 @@ router.get('/:id', async (req, res) => {
             orderNumber: order.order_number,
             tableId: order.table_id,
             waiterId: order.waiter_id,
+            companyId: order.company_id,
             status: order.status,
             paymentStatus: order.payment_status,
             subtotal: parseFloat(order.subtotal),
             tax: parseFloat(order.tax),
-            tip: parseFloat(order.tip),
-            discount: parseFloat(order.discount),
             total: parseFloat(order.total),
-            checkRequestedAt: order.check_requested_at || null,
             items: itemsResult.rows.map(row => ({
                 id: row.id,
-                menuItemId: row.menu_item_id,
                 name: row.name,
-                description: row.item_description,
                 price: parseFloat(row.price),
                 quantity: row.quantity,
-                notes: row.notes
-            })),
-            createdAt: order.created_at,
-            paidAt: order.paid_at
+                notes: row.notes,
+                seatNumber: row.seat_number
+            }))
         });
     }
     catch (error) {
@@ -455,6 +426,28 @@ router.post('/:id/cancel-check', async (req, res) => {
     }
     catch (error) {
         console.error('[Orders] Error canceling check:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * GET /api/v1/orders/:id/history
+ * Get order status history
+ */
+router.get('/:id/history', auth_1.verifyToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ error: 'Unauthorized' });
+        const result = await pool.query(`SELECT h.id, h.old_status, h.new_status, h.user_id, u.name as user_name, h.created_at
+       FROM order_status_history h
+       LEFT JOIN users u ON h.user_id = u.id
+       WHERE h.order_id = $1 AND h.company_id = $2
+       ORDER BY h.created_at DESC`, [id, companyId]);
+        return res.json({ history: result.rows });
+    }
+    catch (error) {
+        console.error('[Orders] Error getting status history:', error);
         return res.status(500).json({ error: error.message });
     }
 });

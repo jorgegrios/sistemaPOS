@@ -12,6 +12,23 @@ const router = Router();
 const kitchenService = new KitchenService(pool);
 
 /**
+ * GET /api/v1/kitchen/stations
+ * Get all kitchen stations
+ */
+router.get('/stations', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const stations = await kitchenService.getStations(companyId);
+    return res.json({ stations });
+  } catch (error: any) {
+    console.error('[Kitchen] Error getting stations:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/v1/kitchen/active-items
  * Get all active kitchen items (status = 'sent' or 'prepared')
  */
@@ -25,8 +42,11 @@ router.get('/active-items', verifyToken, async (req: AuthRequest, res: Response)
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const station = req.query.station as 'kitchen' | 'bar' | undefined;
-    const items = await kitchenService.getActiveItems(companyId, station);
+    const stationId = req.query.stationId as string | undefined;
+    // Legacy support for 'station' param (kitchen/bar) - map to nothing or handle in service if needed
+    // For now we prioritize stationId
+
+    const items = await kitchenService.getActiveItems(companyId, stationId);
     return res.json({ items });
   } catch (error: any) {
     console.error('[Kitchen] Error getting active items:', error);
@@ -83,8 +103,33 @@ router.get('/orders/:orderId/items', verifyToken, async (req: AuthRequest, res: 
 });
 
 /**
+ * POST /api/v1/kitchen/tasks/:id/prepare
+ * Mark kitchen task as prepared
+ */
+router.post('/tasks/:id/prepare', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (req.user?.role !== 'kitchen' && req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { id } = req.params;
+    const task = await kitchenService.markTaskPrepared(id, companyId);
+    return res.json(task);
+  } catch (error: any) {
+    if (error.message.includes('not found')) {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('[Kitchen] Error marking task as prepared:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/v1/kitchen/items/:id/prepare
- * Mark order item as prepared
+ * Mark order item as prepared (Legacy/Full Item)
  */
 router.post('/items/:id/prepare', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
