@@ -13,7 +13,7 @@ export const LoginPage: React.FC = () => {
   const { login, error: authError } = useAuth();
   const { t, i18n } = useTranslation();
 
-  const [email, setEmail] = useState('mesero1@restaurant.com');
+  const [email, setEmail] = useState('mesero@restaurant.com');
   const [password, setPassword] = useState('mesero123');
   const [companySlug, setCompanySlug] = useState('default');
   const [loading, setLoading] = useState(false);
@@ -136,12 +136,12 @@ export const LoginPage: React.FC = () => {
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
             <p className="text-sm text-gray-700 font-semibold mb-2">Credenciales de Prueba (Company: default):</p>
             <div className="text-xs text-gray-600 space-y-1">
-              <p><strong>Mesero:</strong> mesero1@restaurant.com / mesero123</p>
-              <p><strong>Cajero:</strong> cajero@restaurant.com / cajero123</p>
-              <p><strong>Cocina:</strong> cocinero@restaurant.com / cocinero123</p>
-              <p><strong>Bar:</strong> bartender@restaurant.com / bartender123</p>
-              <p><strong>Gerente:</strong> gerente@restaurant.com / gerente123</p>
               <p><strong>Admin:</strong> admin@restaurant.com / admin123</p>
+              <p><strong>Gerente:</strong> gerente@restaurant.com / gerente123</p>
+              <p><strong>Mesero:</strong> mesero@restaurant.com / mesero123</p>
+              <p><strong>Cajero:</strong> cajero@restaurant.com / cajero123</p>
+              <p><strong>Cocinero:</strong> cocinero@restaurant.com / cocinero123</p>
+              <p><strong>Bartender:</strong> bartender@restaurant.com / bartender123</p>
             </div>
           </div>
         </div>
