@@ -195,5 +195,24 @@ router.post('/:id/cancel', verifyToken, async (req: AuthRequest, res: Response) 
   }
 });
 
+/**
+ * GET /api/v1/orders/:id/history
+ * Get order status history
+ */
+router.get('/:id/history', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const history = await ordersService.getStatusHistory(id, companyId);
+    return res.json({ history });
+  } catch (error: any) {
+    console.error('[Orders] Error getting status history:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
 

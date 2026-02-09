@@ -11,7 +11,7 @@ import { TableStatus } from '../../shared/types';
 import { emitEvent, DomainEventType } from '../../shared/events';
 
 export class TablesService {
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool) { }
 
   /**
    * Create Table
@@ -21,7 +21,7 @@ export class TablesService {
 
     const result = await this.pool.query(
       `INSERT INTO tables (id, restaurant_id, table_number, name, capacity, status)
-       VALUES ($1, $2, $3, $4, $5, 'free')
+       VALUES ($1, $2, $3, $4, $5, 'available')
        RETURNING id, name, capacity, status, restaurant_id, created_at`,
       [tableId, request.restaurantId, request.name, request.name, request.capacity]
     );
@@ -114,6 +114,7 @@ export class TablesService {
 
     // SEGUNDO: Obtener solo órdenes activas que TENGAN ITEMS
     // IMPORTANTE: Solo considerar órdenes que TENGAN ITEMS (no órdenes vacías)
+    // IMPORTANTE: Solo considerar órdenes con payment_status = 'pending' (excluir pagadas)
     // 'served' orders are already delivered, so they don't indicate active customers
     // Una orden vacía (sin items) NO indica una mesa ocupada
     // NOTA: Usamos DISTINCT ON para obtener la orden más reciente por mesa
@@ -125,11 +126,12 @@ export class TablesService {
          SELECT id FROM tables WHERE restaurant_id = $1
        )
        AND o.status = ANY(ARRAY['draft', 'sent_to_kitchen']::text[])
+       AND o.payment_status = 'pending'
        ORDER BY o.table_id, o.created_at DESC`,
       [restaurantId]
     );
 
-    console.log(`[Tables] DEBUG: Active orders with items (draft or sent_to_kitchen):`, ordersResult.rows.length, 'orders found');
+    console.log(`[Tables] DEBUG: Active orders with items (draft or sent_to_kitchen, payment pending):`, ordersResult.rows.length, 'orders found');
     ordersResult.rows.forEach((r: any) => {
       console.log(`  - Order ${r.id.substring(0, 8)}: table ${r.table_id?.substring(0, 8)}, status: "${r.status}", total: ${r.total}`);
     });
@@ -194,20 +196,15 @@ export class TablesService {
 
       // Emit events for status changes
       if (request.status === 'occupied') {
-        emitEvent(DomainEventType.TABLE_OCCUPIED, {
-          orderId: '', // Will be set by caller if needed
-          tableId,
-        } as any);
-      } else if (request.status === 'free') {
-        emitEvent(DomainEventType.TABLE_FREED, {
-          orderId: '',
-          tableId,
-        } as any);
+        emitEvent(DomainEventType.TABLE_OCCUPIED, { orderId: '', tableId } as any);
+      } else if (request.status === 'available') {
+        emitEvent(DomainEventType.TABLE_FREED, { orderId: '', tableId } as any);
       } else if (request.status === 'reserved') {
-        emitEvent(DomainEventType.TABLE_RESERVED, {
-          orderId: '',
-          tableId,
-        } as any);
+        emitEvent(DomainEventType.TABLE_RESERVED, { orderId: '', tableId } as any);
+      } else if (request.status === 'paid') {
+        emitEvent(DomainEventType.TABLE_PAID as any, { tableId } as any);
+      } else if (request.status === 'dirty') {
+        emitEvent(DomainEventType.TABLE_DIRTY as any, { tableId } as any);
       }
     }
 
@@ -234,11 +231,32 @@ export class TablesService {
   }
 
   /**
-   * Free Table (set status to free)
-   * Called when order is closed
+   * Free Table (set status to available)
+   * Called when order is closed (legacy) or manually
    */
   async freeTable(tableId: string): Promise<Table> {
-    return this.updateTable(tableId, { status: 'free' });
+    return this.updateTable(tableId, { status: 'available' });
+  }
+
+  /**
+   * Mark Table as Paid (set status to paid)
+   */
+  async markAsPaid(tableId: string): Promise<Table> {
+    return this.updateTable(tableId, { status: 'paid' });
+  }
+
+  /**
+   * Mark Table as Dirty (set status to dirty)
+   */
+  async markAsDirty(tableId: string): Promise<Table> {
+    return this.updateTable(tableId, { status: 'dirty' });
+  }
+
+  /**
+   * Mark Table as Available/Clean (set status to available)
+   */
+  async markAsAvailable(tableId: string): Promise<Table> {
+    return this.updateTable(tableId, { status: 'available' });
   }
 
   /**

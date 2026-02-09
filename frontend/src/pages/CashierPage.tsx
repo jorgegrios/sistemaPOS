@@ -16,8 +16,10 @@ import { CashRegisterSummaryModal } from '../components/CashRegisterSummaryModal
 import { PaidOrdersModal } from '../components/PaidOrdersModal';
 import { CashSession } from '../services/cashier-service';
 import { Modal } from '../components/Modal';
+import { QRPaymentModal } from '../components/QRPaymentModal';
+import { StripePaymentModal } from '../components/StripePaymentModal';
 
-type TableStatus = 'available' | 'active' | 'ready_to_pay' | 'paid';
+type TableStatus = 'available' | 'active' | 'ready_to_pay' | 'paid' | 'dirty' | 'reserved';
 
 interface OrderItem {
   id: string;
@@ -72,6 +74,9 @@ export const CashierPage: React.FC = () => {
   const [actualBalanceInput, setActualBalanceInput] = useState('');
   const [showDiscrepancyReport, setShowDiscrepancyReport] = useState(false);
   const [reportData, setReportData] = useState<any>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [pendingPaymentId, setPendingPaymentId] = useState<string | null>(null);
+  const [showStripeModal, setShowStripeModal] = useState(false);
 
   // Update date and time
   useEffect(() => {
@@ -317,24 +322,32 @@ export const CashierPage: React.FC = () => {
     }
   };
 
-  const getTableStatus = (table: ActiveTable): TableStatus => {
-    // Mesa disponible si no está activa O si no tiene órdenes pendientes
-    if (!table.isActive || !table.orders || table.orders.length === 0) return 'available';
+  const getTableStatus = (table: any): TableStatus => {
+    // 1. Use DB status if it's special
+    if (table.status === 'paid') return 'paid';
+    if (table.status === 'dirty') return 'dirty';
+    if (table.status === 'reserved') return 'reserved';
 
-    // Verificar si alguna orden está servida (todos los items preparados/entregados)
-    const hasServedOrder = table.orders.some(o =>
-      o.orderStatus === 'served' ||
-      (o.servedCount !== undefined && o.itemCount > 0 && o.servedCount === o.itemCount)
-    );
+    // 2. Check if table has active order (unified logic with CreateOrderPage)
+    const hasActiveOrderId = table.activeOrderId &&
+      typeof table.activeOrderId === 'string' &&
+      table.activeOrderId.trim() !== '';
 
-    // Si tiene orden servida, está lista para pagar (verde)
-    if (hasServedOrder) return 'ready_to_pay';
+    // Logic for occupied tables
+    if (hasActiveOrderId || (table.isActive && table.orders && table.orders.length > 0)) {
+      // Virtual status for UX: Ready to pay if served or check requested
+      const hasServedOrder = table.orders?.some((o: any) =>
+        o.orderStatus === 'served' ||
+        (o.servedCount !== undefined && o.itemCount > 0 && o.servedCount === o.itemCount)
+      );
+      const hasCheckRequested = table.orders?.some((o: any) => o.checkRequestedAt);
 
-    // Si tiene check solicitado, también está lista para pagar
-    const hasCheckRequested = table.orders.some(o => o.checkRequestedAt);
-    if (hasCheckRequested) return 'ready_to_pay';
+      if (hasServedOrder || hasCheckRequested) return 'ready_to_pay';
 
-    return 'active';
+      return 'active';
+    }
+
+    return 'available';
   };
 
   const resetPayment = () => {
@@ -395,78 +408,115 @@ export const CashierPage: React.FC = () => {
       return;
     }
 
+    // If card payment, show Stripe modal
+    if (paymentMethod === 'card') {
+      setShowStripeModal(true);
+      return;
+    }
+
     try {
       setProcessing(true);
 
       if (selectedOrder) {
-        // Payment for specific order using domain service
-        try {
-          // Create payment using domain service
-          // Note: Cash payments are auto-processed by the backend
-          const payment = await paymentsDomainService.createPayment({
-            orderId: selectedOrder.id,
-            method: paymentMethod,
-            amount: total, // Already includes tip
-            currency: 'USD'
-          });
+        // Create payment using domain service
+        const payment = await paymentsDomainService.createPayment({
+          orderId: selectedOrder.id,
+          method: paymentMethod,
+          amount: total,
+          currency: 'USD',
+          tipAmount: tip
+        });
 
-          // For cash payments, ensure it's processed (backend auto-processes, but we verify)
-          // The processPayment endpoint is now idempotent, so it's safe to call even if already completed
-          if (paymentMethod === 'cash' && payment.status === 'pending') {
-            await paymentsDomainService.processPayment(payment.id);
-          }
-
-          // Close order after payment (if all items served)
-          try {
-            await ordersDomainService.closeOrder(selectedOrder.id);
-            toast.success('Orden cerrada exitosamente');
-
-            // Free the table after closing the order
-            if (selectedOrder.tableId) {
-              try {
-                await tablesDomainService.freeTable(selectedOrder.tableId);
-                toast.success('Mesa liberada y disponible');
-              } catch (freeErr: any) {
-                console.error('Error freeing table:', freeErr);
-                toast.warning('Pago procesado pero no se pudo liberar la mesa automáticamente');
-              }
-            }
-          } catch (closeErr: any) {
-            // Order cannot be closed yet (items not served, etc.)
-            console.log('Order cannot be closed yet:', closeErr.message);
-            toast.warning('Pago procesado. La orden se cerrará cuando todos los items sean servidos.');
-          }
-
-          toast.success(`Pago ${paymentMethod === 'cash' ? 'en efectivo' : 'con tarjeta'} registrado exitosamente`);
-
-          // Clear selection and reset payment state
-          setSelectedTable(null);
-          setSelectedOrder(null);
-          setOrderItems([]);
-          resetPayment();
-
-          // Wait a moment for backend to process, then reload tables
-          // This ensures the table status is updated correctly
-          setTimeout(async () => {
-            await loadActiveTables();
-          }, 500);
-        } catch (paymentErr: any) {
-          toast.error(paymentErr.message || 'Error al procesar el pago');
-          throw paymentErr;
+        if (paymentMethod === 'qr') {
+          setPendingPaymentId(payment.id);
+          setShowQRModal(true);
+          return;
         }
+
+        // For cash payments, ensure it's processed
+        if (paymentMethod === 'cash' && payment.status === 'pending') {
+          await paymentsDomainService.processPayment(payment.id);
+        }
+
+        // Close order - backend will handle table status via events
+        try {
+          await ordersDomainService.closeOrder(selectedOrder.id);
+          toast.success('Orden procesada. Mesa pasará a estado PAGADA.');
+        } catch (closeErr: any) {
+          console.log('Order cannot be closed yet:', closeErr.message);
+          toast.warning('Pago registrado. La orden se cerrará cuando todos los items sean servidos.');
+        }
+
+        toast.success(`Pago ${paymentMethod === 'cash' ? 'en efectivo' : 'con tarjeta'} registrado exitosamente`);
+
+        // Reset state
+        setSelectedTable(null);
+        setSelectedOrder(null);
+        setOrderItems([]);
+        resetPayment();
+
+        setTimeout(async () => {
+          await loadActiveTables();
+        }, 500);
+
       } else if (cart.length > 0) {
-        // General payment with products (no order)
-        // For general payments without order, we create a payment record
-        // Note: In a full implementation, you might want to create a "general order" first
-        toast.info('Pago general: Esta funcionalidad requiere una orden. Por favor selecciona productos desde el menú de administración.');
-        setProcessing(false);
-        return;
+        toast.info('Pago general sin orden: Por ahora selecciona mesas para procesar pagos.');
       } else {
-        toast.error('Selecciona una orden o productos para pagar');
+        toast.error('Selecciona una mesa o productos');
       }
     } catch (err: any) {
       console.error('Error processing payment:', err);
       toast.error(err.message || 'Error al procesar el pago');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleStripePaymentSuccess = async (paymentMethodId: string) => {
+    try {
+      setShowStripeModal(false);
+      setProcessing(true);
+
+      if (!selectedOrder) {
+        toast.error('No hay orden seleccionada');
+        return;
+      }
+
+      // Create payment with Stripe
+      const payment = await paymentsDomainService.createPayment({
+        orderId: selectedOrder.id,
+        method: 'card',
+        amount: total,
+        currency: 'USD',
+        tipAmount: tip,
+        cardToken: paymentMethodId // Stripe payment method ID
+      });
+
+      // Process the payment
+      await paymentsDomainService.processPayment(payment.id);
+
+      // Close order
+      try {
+        await ordersDomainService.closeOrder(selectedOrder.id);
+        toast.success('✅ Pago con Stripe procesado exitosamente');
+      } catch (closeErr: any) {
+        console.log('Order cannot be closed yet:', closeErr.message);
+        toast.warning('Pago registrado. La orden se cerrará cuando todos los items sean servidos.');
+      }
+
+      // Reset state
+      setSelectedTable(null);
+      setSelectedOrder(null);
+      setOrderItems([]);
+      resetPayment();
+
+      setTimeout(async () => {
+        await loadActiveTables();
+      }, 500);
+
+    } catch (err: any) {
+      console.error('Error processing Stripe payment:', err);
+      toast.error(err.message || 'Error al procesar pago con Stripe');
     } finally {
       setProcessing(false);
     }
@@ -485,6 +535,8 @@ export const CashierPage: React.FC = () => {
     const grouped = {
       ready_to_pay: [] as ActiveTable[],
       active: [] as ActiveTable[],
+      paid: [] as ActiveTable[],
+      dirty: [] as ActiveTable[],
       available: [] as ActiveTable[]
     };
 
@@ -494,6 +546,10 @@ export const CashierPage: React.FC = () => {
         grouped.ready_to_pay.push(table);
       } else if (status === 'active') {
         grouped.active.push(table);
+      } else if (status === 'paid') {
+        grouped.paid.push(table);
+      } else if (status === 'dirty') {
+        grouped.dirty.push(table);
       } else {
         grouped.available.push(table);
       }
@@ -501,6 +557,28 @@ export const CashierPage: React.FC = () => {
 
     return grouped;
   }, [activeTables]);
+
+  const handleMarkDirty = async (tableId: string) => {
+    try {
+      await tablesDomainService.markAsDirty(tableId);
+      toast.success('Mesa marcada como SUCIA');
+      setSelectedTable(null);
+      await loadActiveTables();
+    } catch (err) {
+      toast.error('Error al cambiar estado');
+    }
+  };
+
+  const handleMarkAvailable = async (tableId: string) => {
+    try {
+      await tablesDomainService.markAsAvailable(tableId);
+      toast.success('Mesa marcada como LIMPIA/DISPONIBLE');
+      setSelectedTable(null);
+      await loadActiveTables();
+    } catch (err) {
+      toast.error('Error al cambiar estado');
+    }
+  };
 
   const suggestedTip = useMemo(() => {
     const base = subtotal + tax;
@@ -638,6 +716,28 @@ export const CashierPage: React.FC = () => {
                   />
                 ))}
 
+                {/* Paid tables */}
+                {tablesByStatus.paid.map(table => (
+                  <TableCard
+                    key={table.id}
+                    table={table}
+                    status="paid"
+                    isSelected={selectedTable?.id === table.id}
+                    onClick={() => handleTableSelect(table)}
+                  />
+                ))}
+
+                {/* Dirty tables */}
+                {tablesByStatus.dirty.map(table => (
+                  <TableCard
+                    key={table.id}
+                    table={table}
+                    status="dirty"
+                    isSelected={selectedTable?.id === table.id}
+                    onClick={() => handleTableSelect(table)}
+                  />
+                ))}
+
                 {/* Available tables */}
                 {tablesByStatus.available.map(table => (
                   <TableCard
@@ -675,6 +775,35 @@ export const CashierPage: React.FC = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Table Management Actions (Only for Paid/Dirty states) */}
+            {selectedTable && (getTableStatus(selectedTable) === 'paid' || getTableStatus(selectedTable) === 'dirty') && (
+              <div className="bg-white rounded-xl shadow-lg p-6 border-4 border-indigo-400 animate-in fade-in slide-in-from-top-4 duration-300">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-3xl">{getTableStatus(selectedTable) === 'paid' ? '💰' : '🧹'}</span>
+                  <h3 className="font-extrabold text-gray-800 text-xl">Gestión: Mesa {selectedTable.tableNumber}</h3>
+                </div>
+
+                <div className="space-y-4">
+                  {getTableStatus(selectedTable) === 'paid' && (
+                    <button
+                      onClick={() => handleMarkDirty(selectedTable.id)}
+                      className="w-full py-5 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white rounded-2xl font-black text-lg btn-touch shadow-xl transform transition active:scale-95"
+                    >
+                      🧹 CLIENTES SE FUERON (Marcar Sucia)
+                    </button>
+                  )}
+                  {getTableStatus(selectedTable) === 'dirty' && (
+                    <button
+                      onClick={() => handleMarkAvailable(selectedTable.id)}
+                      className="w-full py-5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-2xl font-black text-lg btn-touch shadow-xl transform transition active:scale-95"
+                    >
+                      ✨ MESA LIMPIA (Marcar Disponible)
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Order Items / Cart */}
             {(selectedOrder || cart.length > 0) && (
               <div className="bg-white rounded-xl shadow-lg p-4 border-2 border-gray-200">
@@ -897,6 +1026,36 @@ export const CashierPage: React.FC = () => {
                 >
                   <span className="text-4xl block mb-2">💳</span>
                   <span>Tarjeta</span>
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('qr')}
+                  className={`py-6 rounded-xl font-bold text-lg transition active:scale-95 btn-touch border-4 ${paymentMethod === 'qr'
+                    ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white border-purple-400 shadow-xl'
+                    : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                    }`}
+                >
+                  <span className="text-4xl block mb-2">📱</span>
+                  <span>QR Code</span>
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('wallet')}
+                  className={`py-6 rounded-xl font-bold text-lg transition active:scale-95 btn-touch border-4 ${paymentMethod === 'wallet'
+                    ? 'bg-gradient-to-br from-pink-500 to-rose-600 text-white border-pink-400 shadow-xl'
+                    : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                    }`}
+                >
+                  <span className="text-4xl block mb-2">👛</span>
+                  <span>Wallet</span>
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('transfer')}
+                  className={`py-6 rounded-xl font-bold text-lg transition active:scale-95 btn-touch border-4 ${paymentMethod === 'transfer'
+                    ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white border-amber-400 shadow-xl'
+                    : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                    }`}
+                >
+                  <span className="text-4xl block mb-2">🏦</span>
+                  <span>Transf.</span>
                 </button>
               </div>
             </div>
@@ -1146,6 +1305,18 @@ export const CashierPage: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      {/* Stripe Payment Modal */}
+      <StripePaymentModal
+        isOpen={showStripeModal}
+        amount={total}
+        onClose={() => setShowStripeModal(false)}
+        onSuccess={handleStripePaymentSuccess}
+        onError={(error) => {
+          toast.error(error);
+          setShowStripeModal(false);
+        }}
+      />
     </div >
   );
 };
@@ -1188,12 +1359,28 @@ const TableCard: React.FC<{
           label: 'En Consumo',
           textColor: 'text-blue-800'
         };
+      case 'paid':
+        return {
+          bg: 'bg-gradient-to-br from-yellow-100 to-orange-100',
+          border: 'border-yellow-500',
+          icon: '💰',
+          label: 'Pagada (Ocupada)',
+          textColor: 'text-yellow-800'
+        };
+      case 'dirty':
+        return {
+          bg: 'bg-gradient-to-br from-red-100 to-orange-200',
+          border: 'border-red-500',
+          icon: '🧹',
+          label: 'Sucia / Por Limpiar',
+          textColor: 'text-red-900'
+        };
       default:
         return {
           bg: 'bg-gradient-to-br from-gray-100 to-gray-200',
           border: 'border-gray-400',
           icon: '🪑',
-          label: 'Disponible',
+          label: 'Libre',
           textColor: 'text-gray-600'
         };
     }

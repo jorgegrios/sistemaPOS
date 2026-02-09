@@ -6,7 +6,7 @@
 
 import { apiClient } from '../../services/api-client';
 
-export type TableStatus = 'free' | 'occupied' | 'reserved';
+export type TableStatus = 'available' | 'occupied' | 'paid' | 'dirty' | 'reserved';
 
 export interface Table {
   id: string;
@@ -89,10 +89,32 @@ class TablesDomainService {
   }
 
   /**
-   * Free Table
+   * Free Table (set status to available)
+   * Use markAsAvailable for better semantics
    */
   async freeTable(tableId: string): Promise<Table> {
-    return this.updateTable(tableId, { status: 'free' });
+    return this.updateTable(tableId, { status: 'available' });
+  }
+
+  /**
+   * Mark Table as Paid
+   */
+  async markAsPaid(tableId: string): Promise<Table> {
+    return this.updateTable(tableId, { status: 'paid' });
+  }
+
+  /**
+   * Mark Table as Dirty
+   */
+  async markAsDirty(tableId: string): Promise<Table> {
+    return apiClient.post<Table>(`/v2/tables/${tableId}/mark-dirty`, {});
+  }
+
+  /**
+   * Mark Table as Available (Clean)
+   */
+  async markAsAvailable(tableId: string): Promise<Table> {
+    return apiClient.post<Table>(`/v2/tables/${tableId}/mark-available`, {});
   }
 
   /**

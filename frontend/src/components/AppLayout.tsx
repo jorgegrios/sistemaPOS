@@ -25,9 +25,12 @@ export const AppLayout: React.FC = () => {
   const orientation = useOrientation();
   const { t, i18n } = useTranslation();
 
-  const toggleLanguage = () => {
+  const toggleLanguage = async () => {
     const newLang = i18n.language === 'es' ? 'en' : 'es';
-    i18n.changeLanguage(newLang);
+    await i18n.changeLanguage(newLang);
+    localStorage.setItem('i18nextLng', newLang);
+    // Force reload to ensure all components update immediately
+    window.location.reload();
   };
 
   // Detectar si es tablet (ancho entre 768px y 1024px)
@@ -39,6 +42,40 @@ export const AppLayout: React.FC = () => {
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // POS Lockdown: Disable browser interaction
+  useEffect(() => {
+    // 1. Disable Right-Click
+    const handleContextMenu = (e: MouseEvent) => e.preventDefault();
+
+    // 2. Disable Specific Shortcuts (F5, F12, Ctrl+R, Ctrl+Shift+I)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Disable F5 and Ctrl+R (Refresh)
+      if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+        e.preventDefault();
+      }
+      // Disable F12 and Ctrl+Shift+I (DevTools)
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {
+        e.preventDefault();
+      }
+    };
+
+    // 3. Confirm before closing/refreshing
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ''; // Required for some browsers
+    };
+
+    window.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
   }, []);
 
   // Detectar si estamos en Dashboard
@@ -64,7 +101,7 @@ export const AppLayout: React.FC = () => {
         ]
         : userRole === 'kitchen'
           ? [
-            // Kitchen solo ve: Menú, Inventario, Compras (sin Dashboard, Orders, Payments)
+            { label: t('nav.kitchen'), path: '/kitchen', icon: '🍳', key: 'kitchen' },
             { label: t('nav.menu'), path: '/menu/manage', icon: '✏️', key: 'menu' },
             { label: t('nav.inventory'), path: '/inventory', icon: '📦', key: 'inventory' },
             { label: t('nav.purchases'), path: '/purchases/orders', icon: '🛒', key: 'purchases' }

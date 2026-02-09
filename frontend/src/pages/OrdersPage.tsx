@@ -41,16 +41,19 @@ export const OrdersPage: React.FC = () => {
   }, [user?.restaurantId, statusFilter]);
 
   const getStatusBadge = (status: string) => {
-    const badges: Record<string, { bg: string; text: string; icon: string; border: string }> = {
-      completed: { bg: 'bg-gradient-to-r from-green-400 to-emerald-500', text: 'text-white', icon: '✓', border: 'border-green-500' },
-      pending: { bg: 'bg-gradient-to-r from-yellow-400 to-orange-500', text: 'text-white', icon: '⏳', border: 'border-yellow-500' },
-      cancelled: { bg: 'bg-gradient-to-r from-red-400 to-rose-500', text: 'text-white', icon: '✕', border: 'border-red-500' }
+    const badges: Record<string, { bg: string; text: string; icon: string; border: string; label: string }> = {
+      draft: { bg: 'bg-gradient-to-r from-gray-400 to-gray-500', text: 'text-white', icon: '📝', border: 'border-gray-500', label: 'Borrador' },
+      sent_to_kitchen: { bg: 'bg-gradient-to-r from-yellow-400 to-orange-500', text: 'text-white', icon: '🍳', border: 'border-yellow-500', label: 'En Cocina' },
+      served: { bg: 'bg-gradient-to-r from-blue-400 to-indigo-500', text: 'text-white', icon: '🍽️', border: 'border-blue-500', label: 'Servido' },
+      closed: { bg: 'bg-gradient-to-r from-green-400 to-emerald-500', text: 'text-white', icon: '✅', border: 'border-green-500', label: 'Completada' },
+      completed: { bg: 'bg-gradient-to-r from-green-400 to-emerald-500', text: 'text-white', icon: '✅', border: 'border-green-500', label: 'Completada' },
+      cancelled: { bg: 'bg-gradient-to-r from-red-400 to-rose-500', text: 'text-white', icon: '✕', border: 'border-red-500', label: 'Cancelada' }
     };
-    const badge = badges[status] || badges.pending;
+    const badge = badges[status] || { bg: 'bg-gray-100', text: 'text-gray-800', icon: '?', border: 'border-gray-300', label: status };
     return (
       <span className={`${badge.bg} ${badge.text} ${badge.border} border-2 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 w-fit shadow-md`}>
         <span>{badge.icon}</span>
-        {status === 'completed' ? 'Completada' : status === 'pending' ? 'Pendiente' : 'Cancelada'}
+        {badge.label}
       </span>
     );
   };
@@ -92,11 +95,10 @@ export const OrdersPage: React.FC = () => {
             <button
               key={status}
               onClick={() => setStatusFilter(status as StatusFilter)}
-              className={`px-5 py-3 sm:px-6 sm:py-3 rounded-xl font-bold text-sm sm:text-base transition duration-200 capitalize active:scale-95 shadow-lg border-2 btn-touch ${
-                statusFilter === status
+              className={`px-5 py-3 sm:px-6 sm:py-3 rounded-xl font-bold text-sm sm:text-base transition duration-200 capitalize active:scale-95 shadow-lg border-2 btn-touch ${statusFilter === status
                   ? 'bg-gradient-to-r from-blue-500 to-cyan-600 text-white border-blue-400 shadow-xl scale-105'
                   : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700 hover:from-gray-200 hover:to-gray-300 active:from-gray-300 active:to-gray-400 border-gray-300'
-              }`}
+                }`}
             >
               {status === 'all' ? 'Todas' : status === 'pending' ? 'Pendientes' : status === 'completed' ? 'Completadas' : 'Canceladas'}
             </button>

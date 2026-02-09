@@ -206,7 +206,9 @@ router.get('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
         id: row.id,
         name: row.name,
         price: parseFloat(row.price),
-        quantity: row.quantity
+        quantity: row.quantity,
+        notes: row.notes,
+        seatNumber: row.seat_number
       }))
     });
   } catch (error: any) {
@@ -520,6 +522,33 @@ router.post('/:id/cancel-check', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[Orders] Error canceling check:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/v1/orders/:id/history
+ * Get order status history
+ */
+router.get('/:id/history', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user?.companyId;
+
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const result = await pool.query(
+      `SELECT h.id, h.old_status, h.new_status, h.user_id, u.name as user_name, h.created_at
+       FROM order_status_history h
+       LEFT JOIN users u ON h.user_id = u.id
+       WHERE h.order_id = $1 AND h.company_id = $2
+       ORDER BY h.created_at DESC`,
+      [id, companyId]
+    );
+
+    return res.json({ history: result.rows });
+  } catch (error: any) {
+    console.error('[Orders] Error getting status history:', error);
     return res.status(500).json({ error: error.message });
   }
 });

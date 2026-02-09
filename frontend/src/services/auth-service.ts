@@ -12,6 +12,7 @@ export interface User {
   role: 'admin' | 'manager' | 'waiter' | 'cashier' | 'kitchen' | 'bartender';
   restaurantId: string;
   companyId: string;
+  sessionTimeoutMinutes?: number;
 }
 
 export interface LoginRequest {
@@ -23,6 +24,7 @@ export interface LoginRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+  sessionTimeoutMinutes?: number;
 }
 
 export interface RegisterRequest {
@@ -48,6 +50,10 @@ class AuthService {
       apiClient.setToken(response.token);
       if (response.user?.restaurantId) {
         apiClient.setRestaurantId(response.user.restaurantId);
+      }
+      // Store session timeout setting
+      if (response.sessionTimeoutMinutes) {
+        localStorage.setItem('sessionTimeoutMinutes', response.sessionTimeoutMinutes.toString());
       }
     }
 
@@ -121,6 +127,14 @@ class AuthService {
    */
   isAuthenticated(): boolean {
     return !!this.getToken();
+  }
+
+  /**
+   * Get session timeout from localStorage
+   */
+  getSessionTimeout(): number {
+    const stored = localStorage.getItem('sessionTimeoutMinutes');
+    return stored ? parseInt(stored, 10) : 20; // Default 20 minutes
   }
 }
 

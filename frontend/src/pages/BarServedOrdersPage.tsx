@@ -7,11 +7,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { barDomainService, BarOrder } from '../domains/bar/service';
+import { kitchenDomainService, KitchenOrder } from '../domains/kitchen/service';
 import { toast } from 'sonner';
 
 export const BarServedOrdersPage: React.FC = () => {
-  const [servedOrders, setServedOrders] = useState<BarOrder[]>([]);
+  const [servedOrders, setServedOrders] = useState<KitchenOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -25,9 +25,8 @@ export const BarServedOrdersPage: React.FC = () => {
   const loadServedOrders = async () => {
     try {
       console.log('[BarServedOrdersPage] Loading served orders...');
-      const orders = await barDomainService.getServedOrders();
+      const orders = await kitchenDomainService.getServedOrders('bar');
       console.log('[BarServedOrdersPage] Received orders:', orders);
-      console.log('[BarServedOrdersPage] Number of orders:', orders.length);
       setServedOrders(orders);
       if (orders.length === 0) {
         console.log('[BarServedOrdersPage] No served orders found');
@@ -108,34 +107,28 @@ export const BarServedOrdersPage: React.FC = () => {
                   <p className="text-xs text-gray-600 mb-2">
                     Orden: {order.orderNumber.substring(0, 12)}
                   </p>
-                  <div className="text-xs text-gray-600 space-y-1.5 mt-2 pb-2 border-b border-gray-200">
-                    <p className="font-semibold text-gray-700">
-                      📅 Tomada: <span className="font-normal">
-                        {new Date(order.createdAt).toLocaleDateString('es-ES', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric'
-                        })} {new Date(order.createdAt).toLocaleTimeString('es-ES', {
+                  <div className="text-xs text-gray-600 space-y-2 mt-3 pb-3 border-b border-gray-100">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-gray-400 uppercase tracking-tighter">Tomada</span>
+                      <span className="font-mono bg-gray-100 px-2 py-1 rounded text-gray-700">
+                        {new Date(order.createdAt).toLocaleTimeString('es-ES', {
                           hour: '2-digit',
                           minute: '2-digit',
                           second: '2-digit'
                         })}
                       </span>
-                    </p>
+                    </div>
                     {order.servedAt && (
-                      <p className="font-semibold text-blue-700">
-                        ✅ Entregada: <span className="font-normal">
-                          {new Date(order.servedAt).toLocaleDateString('es-ES', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric'
-                          })} {new Date(order.servedAt).toLocaleTimeString('es-ES', {
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-blue-400 uppercase tracking-tighter">Entregada</span>
+                        <span className="font-mono bg-blue-50 px-2 py-1 rounded text-blue-700 font-bold">
+                          {new Date(order.servedAt).toLocaleTimeString('es-ES', {
                             hour: '2-digit',
                             minute: '2-digit',
                             second: '2-digit'
                           })}
                         </span>
-                      </p>
+                      </div>
                     )}
                   </div>
                 </div>

@@ -33,24 +33,26 @@ class KitchenDomainService {
    * Get Active Kitchen Items
    * RULE: Only shows items with status = 'sent' or 'prepared'
    */
-  async getActiveItems(): Promise<KitchenOrderItem[]> {
-    const response = await apiClient.get<{ items: KitchenOrderItem[] }>('/v2/kitchen/active-items');
+  async getActiveItems(station?: 'kitchen' | 'bar'): Promise<KitchenOrderItem[]> {
+    const query = station ? `?station=${station}` : '';
+    const response = await apiClient.get<{ items: KitchenOrderItem[] }>(`/v2/kitchen/active-items${query}`);
     return response.items;
   }
 
   /**
    * Get Kitchen Orders (grouped by order)
    */
-  async getKitchenOrders(): Promise<KitchenOrder[]> {
-    const response = await apiClient.get<{ orders: KitchenOrder[] }>('/v2/kitchen/orders');
-    return response.orders;
+  async getKitchenOrders(station?: 'kitchen' | 'bar'): Promise<{ orders: KitchenOrder[]; serverTime: string }> {
+    const query = station ? `?station=${station}` : '';
+    return apiClient.get<{ orders: KitchenOrder[]; serverTime: string }>(`/v2/kitchen/orders${query}`);
   }
 
   /**
    * Get Kitchen Items by Order
    */
-  async getItemsByOrder(orderId: string): Promise<KitchenOrderItem[]> {
-    const response = await apiClient.get<{ items: KitchenOrderItem[] }>(`/v2/kitchen/orders/${orderId}/items`);
+  async getItemsByOrder(orderId: string, station?: 'kitchen' | 'bar'): Promise<KitchenOrderItem[]> {
+    const query = station ? `?station=${station}` : '';
+    const response = await apiClient.get<{ items: KitchenOrderItem[] }>(`/v2/kitchen/orders/${orderId}/items${query}`);
     return response.items;
   }
 
@@ -65,8 +67,9 @@ class KitchenDomainService {
   /**
    * Get Served Orders (orders with all items served)
    */
-  async getServedOrders(): Promise<KitchenOrder[]> {
-    const response = await apiClient.get<{ orders: KitchenOrder[] }>('/v2/kitchen/served-orders');
+  async getServedOrders(station?: 'kitchen' | 'bar'): Promise<KitchenOrder[]> {
+    const query = station ? `?station=${station}` : '';
+    const response = await apiClient.get<{ orders: KitchenOrder[] }>(`/v2/kitchen/served-orders${query}`);
     return response.orders;
   }
 }

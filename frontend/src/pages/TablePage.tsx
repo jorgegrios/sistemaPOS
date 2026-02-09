@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { tableService, Table } from '../services/table-service';
+import { tablesDomainService, Table } from '../domains/tables/service';
 import { toast } from 'sonner';
 
 export const TablePage: React.FC = () => {
@@ -25,10 +25,10 @@ export const TablePage: React.FC = () => {
   const loadTable = async () => {
     try {
       setLoading(true);
-      const data = await tableService.getTable(id!);
+      const data = await tablesDomainService.getTable(id!);
       setTable(data);
       setFormData({
-        tableNumber: data.tableNumber,
+        tableNumber: data.name,
         capacity: data.capacity.toString(),
         status: data.status
       });
@@ -46,10 +46,10 @@ export const TablePage: React.FC = () => {
 
     try {
       setSaving(true);
-      await tableService.updateTable(id, {
-        tableNumber: formData.tableNumber,
+      await tablesDomainService.updateTable(id, {
+        name: formData.tableNumber,
         capacity: parseInt(formData.capacity),
-        status: formData.status
+        status: formData.status as any
       });
       toast.success('Mesa actualizada correctamente');
       navigate('/tables');
@@ -114,17 +114,61 @@ export const TablePage: React.FC = () => {
             <p className="text-xs text-gray-500 mt-1">Número de personas que puede acomodar esta mesa</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Estado
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Estado Actual
             </label>
-            <select
-              value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base"
-            >
-              <option value="available">Disponible</option>
-              <option value="occupied">Ocupada</option>
-            </select>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, status: 'available' })}
+                className={`px-4 py-3 rounded-lg text-sm font-bold transition duration-200 active:scale-95 btn-touch border-2 ${formData.status === 'available'
+                  ? 'bg-green-100 text-green-700 border-green-400 shadow-md'
+                  : 'bg-white text-green-700 border-green-300 hover:bg-green-50'
+                  }`}
+              >
+                🟢 Libre
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, status: 'occupied' })}
+                className={`px-4 py-3 rounded-lg text-sm font-bold transition duration-200 active:scale-95 btn-touch border-2 ${formData.status === 'occupied'
+                  ? 'bg-red-100 text-red-700 border-red-400 shadow-md'
+                  : 'bg-white text-red-700 border-red-300 hover:bg-red-50'
+                  }`}
+              >
+                🔴 Ocupada
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, status: 'reserved' })}
+                className={`px-4 py-3 rounded-lg text-sm font-bold transition duration-200 active:scale-95 btn-touch border-2 ${formData.status === 'reserved'
+                  ? 'bg-yellow-100 text-yellow-700 border-yellow-400 shadow-md'
+                  : 'bg-white text-yellow-700 border-yellow-300 hover:bg-yellow-50'
+                  }`}
+              >
+                🟡 Reservada
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, status: 'dirty' })}
+                className={`px-4 py-3 rounded-lg text-sm font-bold transition duration-200 active:scale-95 btn-touch border-2 ${formData.status === 'dirty'
+                  ? 'bg-orange-100 text-orange-700 border-orange-400 shadow-md'
+                  : 'bg-white text-orange-700 border-orange-300 hover:bg-orange-50'
+                  }`}
+              >
+                🟠 Necesita Limpieza
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, status: 'paid' })}
+                className={`px-4 py-3 rounded-lg text-sm font-bold transition duration-200 active:scale-95 btn-touch border-2 ${formData.status === 'paid'
+                  ? 'bg-blue-100 text-blue-700 border-blue-400 shadow-md'
+                  : 'bg-white text-blue-700 border-blue-300 hover:bg-blue-50'
+                  }`}
+              >
+                💰 Pagada
+              </button>
+            </div>
           </div>
         </div>
         <div className="flex gap-3 mt-6">

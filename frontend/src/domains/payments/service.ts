@@ -6,7 +6,7 @@
 
 import { apiClient } from '../../services/api-client';
 
-export type PaymentMethod = 'cash' | 'card' | 'split';
+export type PaymentMethod = 'cash' | 'card' | 'qr' | 'wallet' | 'transfer' | 'split';
 export type PaymentStatus = 'pending' | 'completed';
 
 export interface Payment {
@@ -25,6 +25,8 @@ export interface CreatePaymentRequest {
   method: PaymentMethod;
   amount: number;
   currency?: string;
+  tipAmount?: number;
+  cardToken?: string; // Stripe payment method ID or token
 }
 
 export interface SplitPaymentRequest {

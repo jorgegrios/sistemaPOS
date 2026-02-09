@@ -57,6 +57,13 @@
         "item_cancelled": "Product cancelled",
         "modifiers": "Modifiers",
         "notes": "Notes",
-        "quantity": "Quantity"
+        "quantity": "Quantity",
+        "table_select": "Select a Table",
+        "table_select_hint": "Choose the table to start taking the order",
+        "back_to_tables": "Back to Tables",
+        "with_order": "With Order",
+        "paid": "Paid",
+        "dirty": "Dirty",
+        "reserved": "Reserved"
     }
 }

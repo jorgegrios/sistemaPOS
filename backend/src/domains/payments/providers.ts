@@ -22,6 +22,76 @@ export interface PaymentProvider {
     }>;
 }
 
+import Stripe from 'stripe';
+
+/**
+ * Stripe Payment Provider
+ */
+class StripeProvider implements PaymentProvider {
+    private stripe: Stripe;
+
+    constructor(apiKey: string) {
+        this.stripe = new Stripe(apiKey, {
+            apiVersion: '2022-11-15',
+        });
+    }
+
+    async processPayment(
+        amount: number,
+        token: string,
+        metadata?: Record<string, any>
+    ): Promise<any> {
+        try {
+            console.log(`[StripeProvider] Processing payment of $${amount} with token ${token.substring(0, 10)}...`);
+
+            // Create payment intent
+            const paymentIntent = await this.stripe.paymentIntents.create({
+                amount: Math.round(amount * 100), // Convert to cents
+                currency: 'usd',
+                payment_method: token,
+                confirm: true,
+                metadata: metadata || {},
+                automatic_payment_methods: {
+                    enabled: true,
+                    allow_redirects: 'never'
+                }
+            });
+
+            console.log(`[StripeProvider] Payment intent created: ${paymentIntent.id}, status: ${paymentIntent.status}`);
+
+            if (paymentIntent.status === 'succeeded') {
+                // Retrieve charges to get card details
+                let maskedCard: string | undefined;
+                if (paymentIntent.latest_charge) {
+                    const charge = await this.stripe.charges.retrieve(paymentIntent.latest_charge as string);
+                    const last4 = charge.payment_method_details?.card?.last4;
+                    maskedCard = last4 ? `************${last4}` : undefined;
+                }
+
+                return {
+                    success: true,
+                    transactionId: paymentIntent.id,
+                    maskedCard
+                };
+            }
+
+            return {
+                success: false,
+                errorCode: paymentIntent.status,
+                errorMessage: 'Payment not completed'
+            };
+        } catch (error: any) {
+            console.error('[StripeProvider] Payment error:', error.message);
+            return {
+                success: false,
+                errorCode: error.code || 'unknown_error',
+                errorMessage: error.message || 'Payment processing failed'
+            };
+        }
+    }
+}
+
+
 /**
  * QR Payment Provider Interface
  */
@@ -110,11 +180,13 @@ export class PaymentProviderFactory {
 
         switch (providerType) {
             case 'stripe':
-                // In a real implementation, we would require a StripeProvider class here
-                // For now, we use mockup or real SDK if available
+                const stripeKey = process.env.STRIPE_SECRET_KEY;
+                if (!stripeKey) {
+                    console.warn('[PaymentProviderFactory] Stripe key not found in environment, using mock provider');
+                    return new MockProvider();
+                }
                 console.log('[PaymentProviderFactory] Using Stripe Provider');
-                // return new StripeProvider(settings.apiKey);
-                return new MockProvider(); // Placeholder
+                return new StripeProvider(stripeKey);
 
             case 'clover':
                 console.log('[PaymentProviderFactory] Using Clover Provider');

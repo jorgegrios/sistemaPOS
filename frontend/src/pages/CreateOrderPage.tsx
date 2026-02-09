@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/auth-context';
 import {
   ordersDomainService,
@@ -52,6 +52,7 @@ interface MenuCategory {
 
 export const CreateOrderPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { t } = useTranslation();
 
@@ -110,6 +111,20 @@ export const CreateOrderPage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Efecto separado para auto-selección de mesa desde URL
+  useEffect(() => {
+    if (!loading && tables.length > 0) {
+      const tableIdFromUrl = searchParams.get('tableId');
+      if (tableIdFromUrl && !selectedTableId) {
+        const table = tables.find(t => t.id === tableIdFromUrl);
+        if (table) {
+          console.log('[CreateOrderPage] Auto-seleccionando mesa desde URL:', tableIdFromUrl);
+          handleTableSelect(table);
+        }
+      }
+    }
+  }, [loading, tables.length, searchParams, selectedTableId]);
 
   const loadTables = async () => {
     if (!user?.restaurantId) return;
@@ -664,6 +679,7 @@ export const CreateOrderPage: React.FC = () => {
       await loadTables();
 
       toast.success(message);
+      setShowMobileCart(false);
     } catch (err: any) {
       console.error('Error sending to kitchen:', err);
       toast.error(err.message || 'Error al enviar a cocina');
@@ -776,6 +792,34 @@ export const CreateOrderPage: React.FC = () => {
                   table.activeOrderId.trim() !== '';
                 const isActive = hasActiveOrderId === true;
 
+                // Check for special states
+                const isPaid = table.status === 'paid';
+                const isDirty = table.status === 'dirty';
+                const isReserved = table.status === 'reserved';
+
+                // Determine display properties
+                let bgColor = 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700 border-2 border-gray-300 hover:border-indigo-400';
+                let emoji = '⚪';
+                let statusLabel = '';
+
+                if (isActive) {
+                  bgColor = 'bg-gradient-to-br from-green-500 to-green-600 text-white ring-4 ring-green-300';
+                  emoji = '🟢';
+                  statusLabel = t('orders.with_order');
+                } else if (isPaid) {
+                  bgColor = 'bg-gradient-to-br from-blue-500 to-blue-600 text-white ring-4 ring-blue-300';
+                  emoji = '💰';
+                  statusLabel = t('orders.paid');
+                } else if (isDirty) {
+                  bgColor = 'bg-gradient-to-br from-orange-500 to-orange-600 text-white ring-4 ring-orange-300';
+                  emoji = '🧹';
+                  statusLabel = t('orders.dirty');
+                } else if (isReserved) {
+                  bgColor = 'bg-gradient-to-br from-yellow-500 to-yellow-600 text-white ring-4 ring-yellow-300';
+                  emoji = '🟡';
+                  statusLabel = t('orders.reserved');
+                }
+
                 return (
                   <button
                     key={table.id}
@@ -784,20 +828,17 @@ export const CreateOrderPage: React.FC = () => {
                       relative p-4 sm:p-5 rounded-xl font-bold transition-all duration-200 active:scale-95
                       min-h-[100px] sm:min-h-[120px] flex flex-col items-center justify-center
                       shadow-lg hover:shadow-xl
-                      ${isActive
-                        ? 'bg-gradient-to-br from-green-500 to-green-600 text-white ring-4 ring-green-300'
-                        : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700 border-2 border-gray-300 hover:border-indigo-400'
-                      }
+                      ${bgColor}
                     `}
                   >
-                    <span className="text-3xl sm:text-4xl mb-2">{isActive ? '🟢' : '⚪'}</span>
+                    <span className="text-3xl sm:text-4xl mb-2">{emoji}</span>
                     <span className="text-base sm:text-lg font-semibold text-center leading-tight">
                       {table.name || `Mesa ${table.id.substring(0, 6)}`}
                     </span>
-                    {isActive && (
+                    {statusLabel && (
                       <>
-                        <span className="absolute top-2 right-2 w-3 h-3 bg-yellow-300 rounded-full animate-pulse"></span>
-                        <span className="text-xs sm:text-sm mt-2 opacity-90">Con Orden</span>
+                        {isActive && <span className="absolute top-2 right-2 w-3 h-3 bg-yellow-300 rounded-full animate-pulse"></span>}
+                        <span className="text-xs sm:text-sm mt-2 opacity-90">{statusLabel}</span>
                       </>
                     )}
                   </button>
@@ -1345,7 +1386,7 @@ export const CreateOrderPage: React.FC = () => {
 
             {/* Resumen y Botones - Fijo en la parte inferior */}
             {(cart.length > 0 || currentOrder) && (
-              <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+              <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0 sticky bottom-0 z-10">
                 <div className="space-y-2 mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Subtotal:</span>
@@ -1413,144 +1454,7 @@ export const CreateOrderPage: React.FC = () => {
             )}
           </div>
 
-          {/* Panel de Carrito Móvil - Overlay */}
-          {showMobileCart && (
-            <>
-              <div
-                className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
-                onClick={() => setShowMobileCart(false)}
-              ></div>
-              <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-300 z-50 max-h-[70vh] flex flex-col rounded-t-xl">
-                <div className="p-3 bg-gradient-to-r from-indigo-600 to-purple-600 flex items-center justify-between rounded-t-xl">
-                  <h2 className="text-lg font-bold text-white">Orden Activa ({cart.length})</h2>
-                  <button
-                    onClick={() => setShowMobileCart(false)}
-                    className="w-8 h-8 bg-white/20 text-white rounded-full flex items-center justify-center font-bold active:scale-95"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-3">
-                  {cart.length === 0 ? (
-                    <div className="text-center py-8">
-                      <div className="text-4xl mb-2">🛒</div>
-                      <p className="text-gray-600 font-medium text-sm">El carrito está vacío</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {cart.map((item, cartIndex) => {
-                        const includedIngredients = getProductIngredients(item.product);
-                        return (
-                          <div
-                            key={item.product.id}
-                            className="bg-white rounded-lg p-2 border border-gray-300 shadow-sm"
-                          >
-                            <div className="flex items-start justify-between mb-2">
-                              <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-gray-800 text-xs mb-0.5 leading-tight">
-                                  {item.product.name}
-                                </h3>
-                              </div>
-                              <button
-                                onClick={() => handleRemoveProduct(item.product.id)}
-                                className="ml-1 w-6 h-6 bg-red-500 text-white rounded flex items-center justify-center font-bold active:scale-95 min-h-[24px] min-w-[24px] text-[10px] flex-shrink-0"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                            {includedIngredients.length > 0 && (
-                              <div className="mb-2 p-1.5 bg-gray-50 rounded border border-gray-200">
-                                <p className="text-[9px] font-semibold text-gray-700 mb-1">🍽️ Incluye:</p>
-                                <div className="space-y-1">
-                                  {includedIngredients.slice(0, 3).map((ingredient, idx) => {
-                                    const isExcluded = item.customization?.excludedIngredients.includes(ingredient) || false;
-                                    return (
-                                      <div
-                                        key={idx}
-                                        className={`text-[9px] p-1 rounded ${isExcluded ? 'bg-red-50 text-red-600 line-through' : 'bg-green-50 text-green-700'}`}
-                                      >
-                                        {ingredient}
-                                      </div>
-                                    );
-                                  })}
-                                  {includedIngredients.length > 3 && (
-                                    <p className="text-[8px] text-gray-500">+{includedIngredients.length - 3} más</p>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => handleUpdateQuantity(item.product.id, item.quantity - 1)}
-                                  className="w-7 h-7 bg-red-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
-                                >
-                                  −
-                                </button>
-                                <span className="w-8 text-center font-bold text-xs bg-indigo-100 text-indigo-700 rounded py-1">
-                                  {item.quantity}
-                                </span>
-                                <button
-                                  onClick={() => handleUpdateQuantity(item.product.id, item.quantity + 1)}
-                                  className="w-7 h-7 bg-green-500 text-white rounded font-bold active:scale-95 min-h-[28px] min-w-[28px] text-xs"
-                                >
-                                  +
-                                </button>
-                              </div>
-                              <span className="font-bold text-indigo-600 text-xs">
-                                ${(() => {
-                                  const basePrice = item.product.basePrice * item.quantity;
-                                  const additionsPrice = (item.customization?.additions.reduce((sum, add) => sum + add.priceDelta, 0) || 0) * item.quantity;
-                                  return (basePrice + additionsPrice).toFixed(2);
-                                })()}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                {cart.length > 0 && (
-                  <div className="p-3 border-t border-gray-200 bg-gray-50">
-                    <div className="space-y-2 mb-3">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-600">Subtotal:</span>
-                        <span className="font-semibold">${subtotal.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-600">IVA (10%):</span>
-                        <span className="font-semibold">${tax.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm font-bold border-t border-gray-300 pt-2">
-                        <span>Total:</span>
-                        <span className="text-indigo-600">${total.toFixed(2)}</span>
-                      </div>
-                    </div>
-                    {(!currentOrder || currentOrder.status === 'draft') && (
-                      <button
-                        onClick={() => {
-                          handleSendToKitchen();
-                          setShowMobileCart(false);
-                        }}
-                        disabled={sendingToKitchen}
-                        className={`
-                        w-full py-3 rounded-xl font-bold text-base transition-all duration-200
-                        min-h-[48px] active:scale-95
-                        ${sendingToKitchen
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg'
-                          }
-                      `}
-                      >
-                        {sendingToKitchen ? 'Enviando...' : 'Enviar a Cocina y/o Bar 🍳🍹'}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+
         </div>
       )}
 

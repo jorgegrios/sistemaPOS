@@ -13,6 +13,7 @@ export interface KitchenOrderItem {
   quantity: number;
   status: OrderItemStatus;
   notes?: string;
+  seatNumber?: number;
   tableNumber: string;
   orderNumber: string;
   createdAt: string;

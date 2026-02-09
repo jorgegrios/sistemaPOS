@@ -57,6 +57,13 @@
         "item_cancelled": "Producto cancelado",
         "modifiers": "Modificadores",
         "notes": "Notas",
-        "quantity": "Cantidad"
+        "quantity": "Cantidad",
+        "table_select": "Selecciona una Mesa",
+        "table_select_hint": "Elige la mesa para comenzar a tomar el pedido",
+        "back_to_tables": "Volver a Mesas",
+        "with_order": "Con Orden",
+        "paid": "Pagada",
+        "dirty": "Sucia",
+        "reserved": "Reservada"
     }
 }

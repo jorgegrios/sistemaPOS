@@ -40,6 +40,9 @@ export class OrdersService {
 
     const order = this.mapRowToOrder(result.rows[0]);
 
+    // Log status change: null -> draft
+    await this.logStatusChange(order.id, null, 'draft', request.companyId, request.waiterId);
+
     // Emit event
     emitEvent(DomainEventType.ORDER_CREATED, {
       orderId: order.id,
@@ -116,9 +119,9 @@ export class OrdersService {
       // Create order item
       const itemId = uuidv4();
       await this.pool.query(
-        `INSERT INTO order_items (id, order_id, company_id, product_id, menu_item_id, name, price, quantity, notes, status)
-         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, 'pending')`,
-        [itemId, orderId, companyId, item.productId, product.name, priceSnapshot, item.quantity, item.notes || null]
+        `INSERT INTO order_items (id, order_id, company_id, product_id, menu_item_id, name, price, quantity, notes, seat_number, status)
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, 'pending')`,
+        [itemId, orderId, companyId, item.productId, product.name, priceSnapshot, item.quantity, item.notes || null, item.seatNumber || null]
       );
 
       newItems.push({
@@ -130,6 +133,7 @@ export class OrdersService {
         priceSnapshot,
         status: 'pending',
         notes: item.notes,
+        seatNumber: item.seatNumber,
         createdAt: new Date().toISOString(),
       });
     }
@@ -204,7 +208,16 @@ export class OrdersService {
     // If order was in 'draft', change its status to 'sent_to_kitchen'
     if (order.status === 'draft' || order.status === 'served') {
       await this.pool.query(
-        `UPDATE orders SET status = 'sent_to_kitchen' WHERE id = $1 AND company_id = $2`,
+        `UPDATE orders SET status = 'sent_to_kitchen', sent_to_kitchen_at = NOW() WHERE id = $1 AND company_id = $2`,
+        [orderId, companyId]
+      );
+
+      // Log status change
+      await this.logStatusChange(orderId, order.status, 'sent_to_kitchen', companyId, order.waiterId);
+    } else if (order.status === 'sent_to_kitchen') {
+      // If already sent, just ensure sent_to_kitchen_at is set if it was null
+      await this.pool.query(
+        `UPDATE orders SET sent_to_kitchen_at = COALESCE(sent_to_kitchen_at, NOW()) WHERE id = $1 AND company_id = $2`,
         [orderId, companyId]
       );
     }
@@ -261,6 +274,9 @@ export class OrdersService {
       [orderId, companyId]
     );
 
+    // Log status change
+    await this.logStatusChange(orderId, order.status, 'served', companyId, order.waiterId);
+
     // Emit event
     emitEvent(DomainEventType.ORDER_SERVED, {
       orderId,
@@ -296,6 +312,9 @@ export class OrdersService {
       [orderId, companyId]
     );
 
+    // Log status change
+    await this.logStatusChange(orderId, order.status, 'closed', companyId, order.waiterId);
+
     const closedOrder = await this.getOrder(orderId, companyId);
 
     // Emit event
@@ -323,6 +342,9 @@ export class OrdersService {
       `UPDATE orders SET status = 'cancelled' WHERE id = $1 AND company_id = $2`,
       [orderId, companyId]
     );
+
+    // Log status change
+    await this.logStatusChange(orderId, order.status, 'cancelled', companyId, order.waiterId);
 
     emitEvent(DomainEventType.ORDER_CANCELLED, {
       orderId,
@@ -440,6 +462,44 @@ export class OrdersService {
       total: parseFloat(row.total),
       createdAt: row.created_at.toISOString(),
     };
+  }
+
+  /**
+   * Log Order Status Change (Audit)
+   */
+  private async logStatusChange(
+    orderId: string,
+    oldStatus: string | null,
+    newStatus: string,
+    companyId: string,
+    userId?: string
+  ): Promise<void> {
+    try {
+      await this.pool.query(
+        `INSERT INTO order_status_history (id, order_id, old_status, new_status, user_id, company_id, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+        [orderId, oldStatus, newStatus, userId || null, companyId]
+      );
+    } catch (err) {
+      console.error('[OrdersService] Error logging status change:', err);
+      // Don't throw - audit logging should not break the main flow
+    }
+  }
+
+  /**
+   * Get Order Status History (Audit Timeline)
+   */
+  async getStatusHistory(orderId: string, companyId: string): Promise<any[]> {
+    const result = await this.pool.query(
+      `SELECT h.id, h.old_status, h.new_status, h.user_id, u.name as user_name, h.created_at
+       FROM order_status_history h
+       LEFT JOIN users u ON h.user_id = u.id
+       WHERE h.order_id = $1 AND h.company_id = $2
+       ORDER BY h.created_at DESC`,
+      [orderId, companyId]
+    );
+
+    return result.rows;
   }
 }
 

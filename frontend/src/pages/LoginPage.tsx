@@ -138,6 +138,8 @@ export const LoginPage: React.FC = () => {
             <div className="text-xs text-gray-600 space-y-1">
               <p><strong>Mesero:</strong> mesero1@restaurant.com / mesero123</p>
               <p><strong>Cajero:</strong> cajero@restaurant.com / cajero123</p>
+              <p><strong>Cocina:</strong> cocinero@restaurant.com / cocinero123</p>
+              <p><strong>Bar:</strong> bartender@restaurant.com / bartender123</p>
               <p><strong>Gerente:</strong> gerente@restaurant.com / gerente123</p>
               <p><strong>Admin:</strong> admin@restaurant.com / admin123</p>
             </div>

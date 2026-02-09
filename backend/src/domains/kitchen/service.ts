@@ -16,8 +16,9 @@ export class KitchenService {
   /**
    * Get Active Kitchen Items
    * RULE: Only show items with status = 'sent' or 'prepared'
+   * @param station The production station to filter by ('kitchen', 'bar', or undefined for all)
    */
-  async getActiveItems(companyId: string): Promise<KitchenOrderItem[]> {
+  async getActiveItems(companyId: string, station?: 'kitchen' | 'bar'): Promise<KitchenOrderItem[]> {
     // Obtener todos los items activos y filtrar por categoría en memoria
     // Esto es más confiable que filtrar en SQL con múltiples condiciones
     const result = await this.pool.query(
@@ -29,24 +30,26 @@ export class KitchenService {
         oi.quantity,
         oi.status,
         oi.notes,
+        oi.seat_number,
         COALESCE(t.name, t.table_number::text) as table_number,
         COALESCE(o.order_number, 'N/A') as order_number,
         oi.created_at,
-        o.created_at as sent_at,
+        o.sent_to_kitchen_at as sent_at,
         mc.id as category_id,
         mc.name as category_name,
         COALESCE(mc.metadata, '{}'::jsonb) as category_metadata
        FROM order_items oi
        INNER JOIN orders o ON oi.order_id = o.id
-       INNER JOIN tables t ON o.table_id = t.id
+       LEFT JOIN tables t ON o.table_id = t.id
        LEFT JOIN menu_items mi ON (
          COALESCE(oi.product_id, oi.menu_item_id) = mi.id
        )
        LEFT JOIN menu_categories mc ON mi.category_id = mc.id
        WHERE oi.status IN ('sent', 'prepared')
        AND o.status IN ('sent_to_kitchen', 'served')
-       ORDER BY o.created_at ASC, o.order_number ASC`,
-      []
+       AND o.company_id = $1
+       ORDER BY o.sent_to_kitchen_at ASC, o.order_number ASC`,
+      [companyId]
     );
 
     // DEBUG: Log para verificar qué items se están obteniendo
@@ -94,17 +97,19 @@ export class KitchenService {
         categoryName.includes('bar') ||
         categoryName.includes('cocktail') ||
         categoryName.includes('coctel') ||
-        categoryName === 'cocteles';
+        categoryName === 'cocteles' ||
+        categoryName.includes('licores') ||
+        categoryName.includes('cerveza') ||
+        categoryName.includes('vino');
 
-      if (isBarCategory) {
-        console.log('[Kitchen] Item excluido (es de bar):', row.product_name, 'categoría:', row.category_name);
-        return false;
+      if (station === 'bar') {
+        return isBarCategory;
+      } else if (station === 'kitchen') {
+        return !isBarCategory;
       }
 
-      return true;
+      return true; // Si no hay station especificada, devolver todo
     });
-
-    console.log('[Kitchen] Items de cocina después de filtrar:', kitchenItems.length);
 
     return kitchenItems.map(row => this.mapRowToKitchenOrderItem(row));
   }
@@ -112,7 +117,7 @@ export class KitchenService {
   /**
    * Get Kitchen Items by Order
    */
-  async getItemsByOrder(orderId: string, companyId: string): Promise<KitchenOrderItem[]> {
+  async getItemsByOrder(orderId: string, companyId: string, station?: 'kitchen' | 'bar'): Promise<KitchenOrderItem[]> {
     const result = await this.pool.query(
       `SELECT 
         oi.id,
@@ -122,16 +127,17 @@ export class KitchenService {
         oi.quantity,
         oi.status,
         oi.notes,
+        oi.seat_number,
         COALESCE(t.name, t.table_number::text) as table_number,
         COALESCE(o.order_number, 'N/A') as order_number,
         oi.created_at,
-        o.created_at as sent_at,
+        o.sent_to_kitchen_at as sent_at,
         mc.id as category_id,
         mc.name as category_name,
         COALESCE(mc.metadata, '{}'::jsonb) as category_metadata
        FROM order_items oi
        INNER JOIN orders o ON oi.order_id = o.id
-       INNER JOIN tables t ON o.table_id = t.id
+       LEFT JOIN tables t ON o.table_id = t.id
        LEFT JOIN menu_items mi ON (
          (oi.product_id IS NOT NULL AND oi.product_id = mi.id)
          OR (oi.product_id IS NULL AND oi.menu_item_id = mi.id)
@@ -139,8 +145,9 @@ export class KitchenService {
        LEFT JOIN menu_categories mc ON mi.category_id = mc.id
        WHERE oi.order_id = $1
        AND oi.status IN ('sent', 'prepared')
+       AND o.company_id = $2
        ORDER BY oi.created_at ASC`,
-      [orderId]
+      [orderId, companyId]
     );
 
     // Filtrar items de bar en memoria
@@ -160,9 +167,18 @@ export class KitchenService {
         categoryName.includes('bar') ||
         categoryName.includes('cocktail') ||
         categoryName.includes('coctel') ||
-        categoryName.includes('cocteles');
+        categoryName.includes('cocteles') ||
+        categoryName.includes('licores') ||
+        categoryName.includes('cerveza') ||
+        categoryName.includes('vino');
 
-      return !isBarCategory;
+      if (station === 'bar') {
+        return isBarCategory;
+      } else if (station === 'kitchen') {
+        return !isBarCategory;
+      }
+
+      return true;
     });
 
     return kitchenItems.map(row => this.mapRowToKitchenOrderItem(row));
@@ -173,9 +189,9 @@ export class KitchenService {
    * RULE: Only show orders with at least one item with status 'sent' (being prepared)
    * RULE: Exclude orders where all kitchen items are 'prepared' or 'served' (order complete)
    */
-  async getKitchenOrders(companyId: string): Promise<KitchenOrder[]> {
+  async getKitchenOrders(companyId: string, station?: 'kitchen' | 'bar'): Promise<KitchenOrder[]> {
     // Only get items with status 'sent' or 'prepared' (not 'served')
-    const items = await this.getActiveItems(companyId);
+    const items = await this.getActiveItems(companyId, station);
 
     // Group items by order and get order creation time
     const ordersMap = new Map<string, KitchenOrder>();
@@ -186,12 +202,14 @@ export class KitchenService {
 
     if (uniqueOrderIds.length > 0) {
       const orderTimesResult = await this.pool.query(
-        `SELECT id, created_at FROM orders WHERE id = ANY($1::uuid[])`,
+        `SELECT id, created_at, sent_to_kitchen_at FROM orders WHERE id = ANY($1::uuid[])`,
         [uniqueOrderIds]
       );
 
       orderTimesResult.rows.forEach(row => {
-        orderTimesMap.set(row.id, new Date(row.created_at).toISOString());
+        // Use sent_to_kitchen_at if available, fallback to created_at, fallback to NOW
+        const timestamp = row.sent_to_kitchen_at || row.created_at || new Date();
+        orderTimesMap.set(row.id, new Date(timestamp).toISOString());
       });
     }
 
@@ -215,9 +233,17 @@ export class KitchenService {
     // Filter out orders where all items are 'prepared' (no items with status 'sent')
     // When all items are prepared, they are automatically marked as 'served' and disappear
     const activeOrders = Array.from(ordersMap.values()).filter(order => {
-      // Only show orders that have at least one item with status 'sent' (being prepared)
-      const hasSentItems = order.items.some(item => item.status === 'sent');
-      return hasSentItems;
+      // Show orders that have at least one item being prepared (sent)
+      // Once all are 'prepared', the order disappears from this view
+      const hasPendingItems = order.items.some(item =>
+        item.status === 'sent'
+      );
+      return hasPendingItems;
+    });
+
+    // Sort by oldest first (highest wait time at top)
+    activeOrders.sort((a, b) => {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     });
 
     return activeOrders;
@@ -297,102 +323,6 @@ export class KitchenService {
       orderItemId,
     } as any);
 
-    // If all KITCHEN items are prepared or served, mark kitchen items as served
-    // Note: Bar items are handled separately in bar service
-    if (totalInt > 0 && totalInt === preparedInt + servedInt) {
-      console.log(`[Kitchen] All kitchen items prepared for order ${item.order_id} - marking kitchen items as served`);
-
-      // Mark all kitchen items as served (only kitchen items, not bar)
-      // Use a subquery to identify kitchen items
-      await this.pool.query(
-        `UPDATE order_items oi
-         SET status = 'served'
-         WHERE oi.order_id = $1 
-         AND oi.status = 'prepared'
-         AND EXISTS (
-           SELECT 1 
-           FROM menu_items mi
-           LEFT JOIN menu_categories mc ON mi.category_id = mc.id
-           WHERE (COALESCE(oi.product_id, oi.menu_item_id) = mi.id)
-           AND (
-             mc.id IS NULL 
-             OR (
-               COALESCE(mc.metadata->>'type', '') NOT IN ('bar', 'drinks')
-               AND COALESCE(mc.metadata->>'location', '') != 'bar'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%bebida%'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%bar%'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%cocktail%'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%coctel%'
-               AND LOWER(COALESCE(mc.name, '')) != 'cocteles'
-             )
-           )
-         )`,
-        [item.order_id]
-      );
-
-      // After marking kitchen items as served, check if all kitchen items are now served
-      // If so, update order status to 'served' to indicate kitchen has finished
-      // This is independent of bar items - when kitchen finishes, order status becomes 'served'
-      const finalKitchenItemsResult = await this.pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'served' THEN 1 ELSE 0 END) as served
-         FROM order_items oi
-         WHERE oi.order_id = $1
-         AND EXISTS (
-           SELECT 1 
-           FROM menu_items mi
-           LEFT JOIN menu_categories mc ON mi.category_id = mc.id
-           WHERE (COALESCE(oi.product_id, oi.menu_item_id) = mi.id)
-           AND (
-             mc.id IS NULL 
-             OR (
-               COALESCE(mc.metadata->>'type', '') NOT IN ('bar', 'drinks')
-               AND COALESCE(mc.metadata->>'location', '') != 'bar'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%bebida%'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%bar%'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%cocktail%'
-               AND LOWER(COALESCE(mc.name, '')) NOT LIKE '%coctel%'
-               AND LOWER(COALESCE(mc.name, '')) != 'cocteles'
-             )
-           )
-         )`,
-        [item.order_id]
-      );
-
-      const finalTotal = parseInt(finalKitchenItemsResult.rows[0].total) || 0;
-      const finalServed = parseInt(finalKitchenItemsResult.rows[0].served) || 0;
-
-      // If all kitchen items are now served, update order status to 'served'
-      // This indicates the kitchen has finished their part, even if bar items are still pending
-      if (finalTotal > 0 && finalServed === finalTotal) {
-        const currentOrderStatus = await this.pool.query(
-          `SELECT status FROM orders WHERE id = $1`,
-          [item.order_id]
-        );
-
-        // Only update if order is still in 'sent_to_kitchen' status
-        if (currentOrderStatus.rows[0]?.status === 'sent_to_kitchen') {
-          await this.pool.query(
-            `UPDATE orders SET status = 'served' WHERE id = $1`,
-            [item.order_id]
-          );
-          console.log(`[Kitchen] All kitchen items served for order ${item.order_id} - order status updated to 'served'`);
-
-          // Emit ORDER_SERVED event to notify waiter that kitchen has finished
-          emitEvent(DomainEventType.ORDER_SERVED, {
-            orderId: item.order_id,
-          } as any);
-        }
-      }
-
-      // Emit events
-      emitEvent(DomainEventType.ALL_ITEMS_PREPARED, {
-        orderId: item.order_id,
-        items: [],
-      } as any);
-    }
-
     return updatedItem;
   }
 
@@ -400,7 +330,7 @@ export class KitchenService {
    * Get Served Orders (orders with all items served)
    * RULE: Only show orders where all kitchen items have status = 'served'
    */
-  async getServedOrders(companyId: string): Promise<KitchenOrder[]> {
+  async getServedOrders(companyId: string, station?: 'kitchen' | 'bar'): Promise<KitchenOrder[]> {
     // Get ALL orders that have at least one item with status 'served' or 'prepared'
     // We'll check each one to see if ALL kitchen items are served/prepared
     const allOrdersResult = await this.pool.query(
@@ -409,8 +339,9 @@ export class KitchenService {
        INNER JOIN order_items oi ON oi.order_id = o.id
        WHERE o.status IN ('served', 'sent_to_kitchen', 'closed')
        AND oi.status IN ('served', 'prepared')
-       ORDER BY o.created_at DESC`,
-      []
+       AND o.company_id = $1
+       ORDER BY o.sent_to_kitchen_at DESC`,
+      [companyId]
     );
 
     console.log('[Kitchen] Checking', allOrdersResult.rows.length, 'orders for served status (have items with served/prepared status)');
@@ -436,6 +367,7 @@ export class KitchenService {
           oi.id,
           oi.order_id,
           oi.status,
+          oi.seat_number,
           COALESCE(oi.product_id, oi.menu_item_id) as product_id,
           mi.id as menu_item_id,
           mc.id as category_id,
@@ -450,32 +382,22 @@ export class KitchenService {
 
       console.log(`[Kitchen] Order ${orderId} has ${allKitchenItemsResult.rows.length} total items`);
 
-      // Filter bar items in memory - items without category are assumed to be kitchen items
+      // Filter items by station - items without category are assumed to be kitchen items
       const kitchenItems = allKitchenItemsResult.rows.filter(row => {
-        // If no category, assume it's a kitchen item (default)
         if (!row.category_id || !row.category_name) {
-          console.log(`[Kitchen] Order ${orderId} item ${row.id} has no category, assuming kitchen item`);
-          return true;
+          return station !== 'bar';
         }
 
-        // Parse metadata
         let metadata: any = {};
         if (row.category_metadata) {
-          if (typeof row.category_metadata === 'string') {
-            try {
-              metadata = JSON.parse(row.category_metadata);
-            } catch (e) {
-              metadata = {};
-            }
-          } else {
-            metadata = row.category_metadata;
-          }
+          metadata = typeof row.category_metadata === 'string'
+            ? JSON.parse(row.category_metadata)
+            : row.category_metadata;
         }
 
         const categoryType = (metadata?.type || metadata?.location || '') as string;
         const categoryName = ((row.category_name || '') as string).toLowerCase();
 
-        // Check if it's a bar category
         const isBarCategory =
           categoryType === 'bar' ||
           categoryType === 'drinks' ||
@@ -483,13 +405,13 @@ export class KitchenService {
           categoryName.includes('bar') ||
           categoryName.includes('cocktail') ||
           categoryName.includes('coctel') ||
-          categoryName === 'cocteles';
+          categoryName === 'cocteles' ||
+          categoryName.includes('licores') ||
+          categoryName.includes('cerveza') ||
+          categoryName.includes('vino');
 
-        if (isBarCategory) {
-          console.log(`[Kitchen] Order ${orderId} item ${row.id} is from bar category: ${row.category_name}, excluding`);
-          return false;
-        }
-
+        if (station === 'bar') return isBarCategory;
+        if (station === 'kitchen') return !isBarCategory;
         return true;
       });
 
@@ -562,16 +484,17 @@ export class KitchenService {
             oi.quantity,
             oi.status,
             oi.notes,
+            oi.seat_number,
             COALESCE(t.name, t.table_number::text) as table_number,
             COALESCE(o.order_number, 'N/A') as order_number,
-            o.created_at as order_created_at,
+            o.sent_to_kitchen_at as order_created_at,
             oi.created_at,
             mc.id as category_id,
             mc.name as category_name,
             COALESCE(mc.metadata, '{}'::jsonb) as category_metadata
            FROM order_items oi
            INNER JOIN orders o ON oi.order_id = o.id
-           INNER JOIN tables t ON o.table_id = t.id
+           LEFT JOIN tables t ON o.table_id = t.id
            LEFT JOIN menu_items mi ON (
              COALESCE(oi.product_id, oi.menu_item_id) = mi.id
            )
@@ -694,6 +617,7 @@ export class KitchenService {
       quantity: parseInt(row.quantity) || 1,
       status: row.status,
       notes: row.notes || undefined,
+      seatNumber: row.seat_number,
       tableNumber: row.table_number || 'Sin mesa',
       orderNumber: row.order_number || 'N/A',
       createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),

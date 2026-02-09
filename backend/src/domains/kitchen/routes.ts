@@ -3,7 +3,7 @@
  * RESTful API for kitchen operations
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { verifyToken, AuthRequest } from '../../routes/auth';
 import { KitchenService } from './service';
 import { pool } from '../../shared/db';
@@ -14,16 +14,19 @@ const kitchenService = new KitchenService(pool);
 /**
  * GET /api/v1/kitchen/active-items
  * Get all active kitchen items (status = 'sent' or 'prepared')
- * RULE: Kitchen only sees items with status = 'sent' or 'prepared'
  */
 router.get('/active-items', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    // Verify user is kitchen role
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Verify user is kitchen role or admin
     if (req.user?.role !== 'kitchen' && req.user?.role !== 'admin') {
-      return res.status(403).json({ error: 'Only kitchen staff can access this endpoint' });
+      return res.status(403).json({ error: 'Access denied' });
     }
 
-    const items = await kitchenService.getActiveItems();
+    const station = req.query.station as 'kitchen' | 'bar' | undefined;
+    const items = await kitchenService.getActiveItems(companyId, station);
     return res.json({ items });
   } catch (error: any) {
     console.error('[Kitchen] Error getting active items:', error);
@@ -37,13 +40,19 @@ router.get('/active-items', verifyToken, async (req: AuthRequest, res: Response)
  */
 router.get('/orders', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    // Verify user is kitchen role
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (req.user?.role !== 'kitchen' && req.user?.role !== 'admin') {
-      return res.status(403).json({ error: 'Only kitchen staff can access this endpoint' });
+      return res.status(403).json({ error: 'Access denied' });
     }
 
-    const orders = await kitchenService.getKitchenOrders();
-    return res.json({ orders });
+    const station = req.query.station as 'kitchen' | 'bar' | undefined;
+    const orders = await kitchenService.getKitchenOrders(companyId, station);
+    return res.json({
+      orders,
+      serverTime: new Date().toISOString()
+    });
   } catch (error: any) {
     console.error('[Kitchen] Error getting orders:', error);
     return res.status(500).json({ error: error.message });
@@ -56,13 +65,16 @@ router.get('/orders', verifyToken, async (req: AuthRequest, res: Response) => {
  */
 router.get('/orders/:orderId/items', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    // Verify user is kitchen role
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (req.user?.role !== 'kitchen' && req.user?.role !== 'admin') {
-      return res.status(403).json({ error: 'Only kitchen staff can access this endpoint' });
+      return res.status(403).json({ error: 'Access denied' });
     }
 
     const { orderId } = req.params;
-    const items = await kitchenService.getItemsByOrder(orderId);
+    const station = req.query.station as 'kitchen' | 'bar' | undefined;
+    const items = await kitchenService.getItemsByOrder(orderId, companyId, station);
     return res.json({ items });
   } catch (error: any) {
     console.error('[Kitchen] Error getting items by order:', error);
@@ -73,17 +85,18 @@ router.get('/orders/:orderId/items', verifyToken, async (req: AuthRequest, res: 
 /**
  * POST /api/v1/kitchen/items/:id/prepare
  * Mark order item as prepared
- * RULE: Only mark items with status = 'sent' as 'prepared'
  */
 router.post('/items/:id/prepare', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    // Verify user is kitchen role
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (req.user?.role !== 'kitchen' && req.user?.role !== 'admin') {
-      return res.status(403).json({ error: 'Only kitchen staff can access this endpoint' });
+      return res.status(403).json({ error: 'Access denied' });
     }
 
     const { id } = req.params;
-    const item = await kitchenService.markItemPrepared(id);
+    const item = await kitchenService.markItemPrepared(id, companyId);
     return res.json(item);
   } catch (error: any) {
     if (error.message.includes('not found')) {
@@ -96,16 +109,19 @@ router.post('/items/:id/prepare', verifyToken, async (req: AuthRequest, res: Res
 
 /**
  * GET /api/v2/kitchen/served-orders
- * Get served orders (orders with all items served)
+ * Get served orders
  */
 router.get('/served-orders', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    // Verify user is kitchen role
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Unauthorized' });
+
     if (req.user?.role !== 'kitchen' && req.user?.role !== 'admin') {
-      return res.status(403).json({ error: 'Only kitchen staff can access this endpoint' });
+      return res.status(403).json({ error: 'Access denied' });
     }
 
-    const orders = await kitchenService.getServedOrders();
+    const station = req.query.station as 'kitchen' | 'bar' | undefined;
+    const orders = await kitchenService.getServedOrders(companyId, station);
     return res.json({ orders });
   } catch (error: any) {
     console.error('[Kitchen] Error getting served orders:', error);
@@ -114,5 +130,3 @@ router.get('/served-orders', verifyToken, async (req: AuthRequest, res: Response
 });
 
 export default router;
-
-

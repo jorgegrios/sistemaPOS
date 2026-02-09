@@ -105,6 +105,36 @@ router.put('/:id', verifyToken, async (req: AuthRequest, res: Response) => {
 });
 
 /**
+ * POST /api/v1/tables/:id/mark-dirty
+ * Mark table as dirty (manual action when guests leave)
+ */
+router.post('/:id/mark-dirty', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const table = await tablesService.markAsDirty(id);
+    return res.json(table);
+  } catch (error: any) {
+    console.error('[Tables] Error marking table as dirty:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/v1/tables/:id/mark-available
+ * Mark table as available (manual action when table is cleaned)
+ */
+router.post('/:id/mark-available', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const table = await tablesService.markAsAvailable(id);
+    return res.json(table);
+  } catch (error: any) {
+    console.error('[Tables] Error marking table as available:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * DELETE /api/v1/tables/:id
  * Delete table
  */

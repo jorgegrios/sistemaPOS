@@ -26,6 +26,7 @@ export interface OrderItem {
   priceSnapshot: number; // Frozen price at time of order
   status: OrderItemStatus;
   notes?: string;
+  seatNumber?: number;
   createdAt: string;
 }
 
@@ -40,6 +41,7 @@ export interface AddItemsRequest {
     productId: string;
     quantity: number;
     notes?: string;
+    seatNumber?: number;
   }>;
 }
 

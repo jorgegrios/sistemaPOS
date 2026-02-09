@@ -91,6 +91,21 @@ router.post('/login', async (req: Request, res: Response) => {
       { expiresIn: '24h' }
     );
 
+    // Get company session timeout setting (optional - handles migration not run yet)
+    let sessionTimeoutMinutes = 20; // Default
+    try {
+      const companyResult = await pool.query(
+        'SELECT session_timeout_minutes FROM companies WHERE id = $1',
+        [user.company_id]
+      );
+      if (companyResult.rows[0]?.session_timeout_minutes) {
+        sessionTimeoutMinutes = companyResult.rows[0].session_timeout_minutes;
+      }
+    } catch (error: any) {
+      // Column doesn't exist yet - use default
+      console.log('[Auth] session_timeout_minutes column not found, using default 20 minutes');
+    }
+
     // Update last_login
     await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
 
@@ -103,7 +118,8 @@ router.post('/login', async (req: Request, res: Response) => {
         role: user.role,
         restaurantId: user.restaurant_id,
         companyId: user.company_id
-      }
+      },
+      sessionTimeoutMinutes
     });
   } catch (error: any) {
     console.error('[Auth] Login error:', error);

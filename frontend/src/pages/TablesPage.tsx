@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/auth-context';
-import { tableService, Table } from '../services/table-service';
+import { tablesDomainService, Table } from '../domains/tables/service';
 import { toast } from 'sonner';
 
 export const TablesPage: React.FC = () => {
@@ -25,7 +25,8 @@ export const TablesPage: React.FC = () => {
   const loadTables = async () => {
     try {
       setLoading(true);
-      const data = await tableService.getTables();
+      const restaurantId = user?.restaurantId || '';
+      const data = await tablesDomainService.getTablesByRestaurant(restaurantId);
       setTables(data);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Error al cargar mesas';
@@ -44,7 +45,12 @@ export const TablesPage: React.FC = () => {
     }
 
     try {
-      await tableService.createTable(formData.tableNumber, parseInt(formData.capacity));
+      const restaurantId = user?.restaurantId || '';
+      await tablesDomainService.createTable({
+        name: formData.tableNumber,
+        capacity: parseInt(formData.capacity),
+        restaurantId
+      });
       toast.success('Mesa creada correctamente');
       setShowCreateModal(false);
       setFormData({ tableNumber: '', capacity: '4' });
@@ -60,12 +66,40 @@ export const TablesPage: React.FC = () => {
     }
 
     try {
-      await tableService.deleteTable(id);
+      await tablesDomainService.deleteTable(id);
       toast.success('Mesa eliminada correctamente');
       loadTables();
     } catch (err: any) {
       toast.error(err.message || 'Error al eliminar mesa');
     }
+  };
+
+  const handleStatusChange = async (tableId: string, newStatus: string) => {
+    try {
+      await tablesDomainService.updateTable(tableId, { status: newStatus as any });
+      const statusLabels: Record<string, string> = {
+        available: 'Libre',
+        occupied: 'Ocupada',
+        reserved: 'Reservada',
+        dirty: 'Necesita Limpieza',
+        paid: 'Pagada'
+      };
+      toast.success(`Mesa marcada como: ${statusLabels[newStatus]}`);
+      loadTables();
+    } catch (err: any) {
+      toast.error(err.message || 'Error al cambiar estado');
+    }
+  };
+
+  const getStatusConfig = (status: string) => {
+    const configs: Record<string, { label: string; color: string; emoji: string }> = {
+      available: { label: 'Libre', color: 'bg-green-100 text-green-700 border-green-300', emoji: '🟢' },
+      occupied: { label: 'Ocupada', color: 'bg-red-100 text-red-700 border-red-300', emoji: '🔴' },
+      reserved: { label: 'Reservada', color: 'bg-yellow-100 text-yellow-700 border-yellow-300', emoji: '🟡' },
+      dirty: { label: 'Necesita Limpieza', color: 'bg-orange-100 text-orange-700 border-orange-300', emoji: '🟠' },
+      paid: { label: 'Pagada', color: 'bg-blue-100 text-blue-700 border-blue-300', emoji: '💰' }
+    };
+    return configs[status] || configs.available;
   };
 
   if (user?.role !== 'admin' && user?.role !== 'manager') {
@@ -126,7 +160,7 @@ export const TablesPage: React.FC = () => {
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
-                    Mesa {table.tableNumber}
+                    Mesa {table.name}
                   </h3>
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -136,18 +170,64 @@ export const TablesPage: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <span className="text-gray-600 text-sm">Estado:</span>
                       <span
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          table.status === 'available'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-yellow-100 text-yellow-700'
-                        }`}
+                        className={`px-3 py-1 rounded-full text-xs font-bold border-2 ${getStatusConfig(table.status).color
+                          }`}
                       >
-                        {table.status === 'available' ? 'Disponible' : 'Ocupada'}
+                        {getStatusConfig(table.status).emoji} {getStatusConfig(table.status).label}
                       </span>
                     </div>
                   </div>
                 </div>
               </div>
+
+              {/* Quick Status Change Buttons */}
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <p className="text-xs text-gray-500 mb-2 font-semibold">Cambiar Estado:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => handleStatusChange(table.id, 'available')}
+                    disabled={table.status === 'available'}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold transition duration-200 active:scale-95 btn-touch ${table.status === 'available'
+                      ? 'bg-green-100 text-green-700 border-2 border-green-300 cursor-not-allowed opacity-60'
+                      : 'bg-white text-green-700 border-2 border-green-300 hover:bg-green-50'
+                      }`}
+                  >
+                    🟢 Libre
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange(table.id, 'occupied')}
+                    disabled={table.status === 'occupied'}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold transition duration-200 active:scale-95 btn-touch ${table.status === 'occupied'
+                      ? 'bg-red-100 text-red-700 border-2 border-red-300 cursor-not-allowed opacity-60'
+                      : 'bg-white text-red-700 border-2 border-red-300 hover:bg-red-50'
+                      }`}
+                  >
+                    🔴 Ocupada
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange(table.id, 'reserved')}
+                    disabled={table.status === 'reserved'}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold transition duration-200 active:scale-95 btn-touch ${table.status === 'reserved'
+                      ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-300 cursor-not-allowed opacity-60'
+                      : 'bg-white text-yellow-700 border-2 border-yellow-300 hover:bg-yellow-50'
+                      }`}
+                  >
+                    🟡 Reservada
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange(table.id, 'dirty')}
+                    disabled={table.status === 'dirty'}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold transition duration-200 active:scale-95 btn-touch ${table.status === 'dirty'
+                      ? 'bg-orange-100 text-orange-700 border-2 border-orange-300 cursor-not-allowed opacity-60'
+                      : 'bg-white text-orange-700 border-2 border-orange-300 hover:bg-orange-50'
+                      }`}
+                  >
+                    🟠 Limpiar
+                  </button>
+                </div>
+              </div>
+
+              {/* Admin Actions */}
               <div className="flex gap-2 mt-4">
                 <button
                   onClick={() => navigate(`/tables/${table.id}`)}

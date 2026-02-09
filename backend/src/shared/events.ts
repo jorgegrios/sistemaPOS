@@ -29,6 +29,8 @@ export enum DomainEventType {
   TABLE_OCCUPIED = 'table:occupied',
   TABLE_FREED = 'table:freed',
   TABLE_RESERVED = 'table:reserved',
+  TABLE_PAID = 'table:paid',
+  TABLE_DIRTY = 'table:dirty',
 
   // Payments
   PAYMENT_COMPLETED = 'payment:completed',

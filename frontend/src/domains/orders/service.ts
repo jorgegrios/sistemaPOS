@@ -47,6 +47,7 @@ export interface AddItemsRequest {
     productId: string;
     quantity: number;
     notes?: string;
+    seatNumber?: number;
   }>;
 }
 

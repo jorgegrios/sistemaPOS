@@ -22,7 +22,7 @@ export interface Order {
   orderNumber: string;
   tableId: string;
   waiterId: string;
-  status: 'pending' | 'completed' | 'cancelled';
+  status: 'draft' | 'sent_to_kitchen' | 'served' | 'closed' | 'cancelled' | 'pending' | 'completed';
   paymentStatus?: 'pending' | 'paid' | 'failed';
   subtotal: number;
   tax: number;
@@ -144,6 +144,13 @@ class OrderService {
    */
   async cancelCheck(orderId: string): Promise<{ ok: boolean; message: string; order: { id: string; orderNumber: string; checkRequestedAt: null } }> {
     return apiClient.post(`/v1/orders/${orderId}/cancel-check`);
+  }
+
+  /**
+   * Get order status history
+   */
+  async getOrderHistory(orderId: string): Promise<{ history: any[] }> {
+    return apiClient.get<{ history: any[] }>(`/v1/orders/${orderId}/history`);
   }
 }
 

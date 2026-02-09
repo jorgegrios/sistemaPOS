@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config(); // ← MOVER AQUÍ, ANTES DE TODO
+// Config reload trigger: 2026-01-24
 
 import express from 'express';
 import cors from 'cors';
@@ -238,12 +239,13 @@ onEvent(DomainEventType.ORDER_CREATED, async (payload: any) => {
   }
 });
 
-// Listen for order closed - free table
+// Listen for order closed - mark table as paid (it stays occupied by customers but bill is done)
 onEvent(DomainEventType.ORDER_CLOSED, async (payload: any) => {
   try {
     const { tableId } = payload;
     if (tableId) {
-      await tablesService.freeTable(tableId);
+      await tablesService.markAsPaid(tableId);
+      console.log(`[Event] Table ${tableId} marked as PAID after order closure`);
     }
   } catch (error) {
     console.error('[Event] Error handling ORDER_CLOSED:', error);

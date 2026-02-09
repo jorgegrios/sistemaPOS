@@ -85,6 +85,9 @@ export class PaymentsService {
         [request.orderId, companyId]
       );
 
+      // Update table status to paid
+      await this.updateTableStatusToPaid(request.orderId);
+
       // Get order details for event
       const orderInfo = await this.pool.query(
         'SELECT restaurant_id FROM orders WHERE id = $1',
@@ -160,6 +163,9 @@ export class PaymentsService {
          WHERE id = $1 AND company_id = $2`,
       [payment.orderId, companyId]
     );
+
+    // Update table status to paid
+    await this.updateTableStatusToPaid(payment.orderId);
 
     const updatedPayment = await this.getPayment(paymentId, companyId);
 
@@ -241,6 +247,9 @@ export class PaymentsService {
        WHERE id = $1 AND company_id = $2 AND payment_status = 'pending'`,
       [payment.orderId, companyId]
     );
+
+    // Update table status to paid
+    await this.updateTableStatusToPaid(payment.orderId);
 
     const updatedPayment = await this.getPayment(paymentId, companyId);
 
@@ -350,5 +359,36 @@ export class PaymentsService {
       createdAt: row.created_at.toISOString(),
       completedAt: row.updated_at && row.status === 'completed' ? row.updated_at.toISOString() : undefined,
     };
+  }
+
+  /**
+   * Update Table Status to Paid
+   * Called after payment is completed
+   */
+  private async updateTableStatusToPaid(orderId: string): Promise<void> {
+    try {
+      // Get table_id from order
+      const orderResult = await this.pool.query(
+        'SELECT table_id FROM orders WHERE id = $1',
+        [orderId]
+      );
+
+      if (orderResult.rows.length === 0 || !orderResult.rows[0].table_id) {
+        return; // No table associated, skip
+      }
+
+      const tableId = orderResult.rows[0].table_id;
+
+      // Update table status to 'paid'
+      await this.pool.query(
+        `UPDATE tables SET status = 'paid' WHERE id = $1`,
+        [tableId]
+      );
+
+      console.log(`[PaymentsService] Table ${tableId} status updated to 'paid'`);
+    } catch (err) {
+      console.error('[PaymentsService] Error updating table status:', err);
+      // Don't throw - table status update should not break payment flow
+    }
   }
 }
