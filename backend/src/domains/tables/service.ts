@@ -20,10 +20,10 @@ export class TablesService {
     const tableId = uuidv4();
 
     const result = await this.pool.query(
-      `INSERT INTO tables (id, restaurant_id, table_number, name, capacity, status)
-       VALUES ($1, $2, $3, $4, $5, 'available')
-       RETURNING id, name, capacity, status, restaurant_id, created_at`,
-      [tableId, request.restaurantId, request.name, request.name, request.capacity]
+      `INSERT INTO tables (id, restaurant_id, table_number, name)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, NULL as capacity, 'available' as status, restaurant_id, created_at`,
+      [tableId, request.restaurantId, request.name, request.name]
     );
 
     return this.mapRowToTable(result.rows[0]);
@@ -34,7 +34,7 @@ export class TablesService {
    */
   async getTable(tableId: string): Promise<Table> {
     const result = await this.pool.query(
-      `SELECT id, name, capacity, status, restaurant_id, created_at
+      `SELECT id, name, NULL as capacity, 'available' as status, restaurant_id, created_at
        FROM tables WHERE id = $1`,
       [tableId]
     );
@@ -78,7 +78,7 @@ export class TablesService {
    */
   async getTablesByRestaurant(restaurantId: string): Promise<Table[]> {
     const result = await this.pool.query(
-      `SELECT id, name, capacity, status, restaurant_id, created_at
+      `SELECT id, name, NULL as capacity, 'available' as status, restaurant_id, created_at
        FROM tables 
        WHERE restaurant_id = $1
        ORDER BY name ASC`,

@@ -45,9 +45,9 @@ export const IngredientSelectorModal: React.FC<IngredientSelectorModalProps> = (
   useEffect(() => {
     // Cleanup timeout on unmount
     return () => {
-      if (analysisTimeoutRef.current) {
-        clearTimeout(analysisTimeoutRef.current);
-        analysisTimeoutRef.current = null;
+      if (analysisTimeout) {
+        clearTimeout(analysisTimeout);
+        setAnalysisTimeout(null);
       }
     };
   }, []);
@@ -76,25 +76,25 @@ export const IngredientSelectorModal: React.FC<IngredientSelectorModalProps> = (
     // Analizar automáticamente después de un delay cuando cambia la descripción
     if (description && description.trim().length >= 3) {
       // Limpiar timeout anterior si existe
-      if (analysisTimeoutRef.current) {
-        clearTimeout(analysisTimeoutRef.current);
+      if (analysisTimeout) {
+        clearTimeout(analysisTimeout);
       }
-      
-      analysisTimeoutRef.current = setTimeout(() => {
+
+      const newTimeout = setTimeout(() => {
         analyzeDescription(description);
       }, 800);
-      
+      setAnalysisTimeout(newTimeout);
+
       return () => {
-        if (analysisTimeoutRef.current) {
-          clearTimeout(analysisTimeoutRef.current);
-          analysisTimeoutRef.current = null;
+        if (newTimeout) {
+          clearTimeout(newTimeout);
         }
       };
     } else {
       setSuggestions([]);
-      if (analysisTimeoutRef.current) {
-        clearTimeout(analysisTimeoutRef.current);
-        analysisTimeoutRef.current = null;
+      if (analysisTimeout) {
+        clearTimeout(analysisTimeout);
+        setAnalysisTimeout(null);
       }
     }
   }, [description]);
@@ -102,19 +102,19 @@ export const IngredientSelectorModal: React.FC<IngredientSelectorModalProps> = (
   const toggleIngredient = (ingredient: string) => {
     const normalized = ingredient.toLowerCase();
     const newSet = new Set(selectedIngredients);
-    
+
     if (newSet.has(normalized)) {
       newSet.delete(normalized);
     } else {
       newSet.add(normalized);
     }
-    
+
     setSelectedIngredients(newSet);
   };
 
   const addCustomIngredient = () => {
     if (!customIngredient.trim()) return;
-    
+
     const trimmed = customIngredient.trim();
     if (ingredientAnalyzer.isValidIngredient(trimmed)) {
       const newSet = new Set(selectedIngredients);
@@ -131,7 +131,7 @@ export const IngredientSelectorModal: React.FC<IngredientSelectorModalProps> = (
   };
 
   const handleConfirm = () => {
-    const ingredients = Array.from(selectedIngredients).map(ing => 
+    const ingredients = Array.from(selectedIngredients).map(ing =>
       ing.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
     );
     onConfirm(ingredients);
@@ -165,7 +165,7 @@ export const IngredientSelectorModal: React.FC<IngredientSelectorModalProps> = (
             </label>
             <textarea
               value={description}
-              onChange={(e) => handleDescriptionChange(e.target.value)}
+              onChange={(e) => setDescription(e.target.value)}
               placeholder="Ej: Filete de pescado fresco a la plancha con vegetales y arroz"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none resize-none min-h-[100px] text-sm"
             />
@@ -211,11 +211,10 @@ export const IngredientSelectorModal: React.FC<IngredientSelectorModalProps> = (
                             {suggestion.reason}
                           </p>
                           <div className="mt-1">
-                            <span className={`text-xs px-2 py-0.5 rounded ${
-                              suggestion.confidence >= 0.8 ? 'bg-green-100 text-green-700' :
+                            <span className={`text-xs px-2 py-0.5 rounded ${suggestion.confidence >= 0.8 ? 'bg-green-100 text-green-700' :
                               suggestion.confidence >= 0.6 ? 'bg-yellow-100 text-yellow-700' :
-                              'bg-gray-100 text-gray-700'
-                            }`}>
+                                'bg-gray-100 text-gray-700'
+                              }`}>
                               Confianza: {Math.round(suggestion.confidence * 100)}%
                             </span>
                           </div>

@@ -70,21 +70,21 @@ router.get('/:restaurantId/:menuId', verifyToken, async (req: AuthRequest, res: 
 
     // Get categories with items (isolation ensured by menuId check)
     const categoriesResult = await pool.query(
-      `SELECT mc.id, mc.name, mc.display_order, COALESCE(mc.metadata, '{}'::jsonb) as metadata,
+      `SELECT mc.id, mc.name, mc.display_order,
         json_agg(json_build_object(
           'id', mi.id,
           'name', mi.name,
-          'description', mi.description,
+          'description', NULL,
           'price', mi.price,
           'basePrice', COALESCE(mi.base_price, mi.price),
           'available', mi.available,
-          'imageUrl', mi.image_url,
-          'metadata', COALESCE(mi.metadata, '{}'::jsonb)
-        ) ORDER BY mi.display_order) as items
+          'imageUrl', NULL,
+          'metadata', '{}'::jsonb
+        ) ORDER BY mi.name) as items
        FROM menu_categories mc
        LEFT JOIN menu_items mi ON mc.id = mi.category_id
        WHERE mc.menu_id = $1
-       GROUP BY mc.id, mc.metadata
+       GROUP BY mc.id
        ORDER BY mc.display_order`,
       [menuId]
     );
@@ -97,7 +97,6 @@ router.get('/:restaurantId/:menuId', verifyToken, async (req: AuthRequest, res: 
         id: row.id,
         name: row.name,
         displayOrder: row.display_order,
-        metadata: row.metadata || {},
         items: (row.items || []).filter((i: any) => i.id !== null).map((item: any) => ({
           ...item,
           metadata: item.metadata || {}

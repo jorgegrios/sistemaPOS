@@ -18,19 +18,16 @@ export class ProductsService {
     const productId = uuidv4();
 
     const result = await this.pool.query(
-      `INSERT INTO menu_items (id, company_id, category_id, name, description, price, base_price, image_url, available, active, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $8, $9)
-       RETURNING id, name, category_id, base_price, available as active, description, image_url, metadata, created_at`,
+      `INSERT INTO menu_items (id, company_id, category_id, name, price, base_price, available, active)
+       VALUES ($1, $2, $3, $4, $5, $5, $6, $6)
+       RETURNING id, name, category_id, base_price, available as active, NULL as description, NULL as image_url, NULL as metadata, created_at`,
       [
         productId,
         companyId,
         request.categoryId,
         request.name,
-        request.description || null,
         request.basePrice,
-        request.imageUrl || null,
         request.active !== false,
-        request.metadata ? JSON.stringify(request.metadata) : null,
       ]
     );
 
@@ -42,7 +39,7 @@ export class ProductsService {
    */
   async getProduct(productId: string, companyId: string): Promise<Product> {
     const result = await this.pool.query(
-      `SELECT id, name, category_id, base_price, price, available as active, description, image_url, metadata, created_at
+      `SELECT id, name, category_id, base_price, price, available as active, NULL as description, NULL as image_url, NULL as metadata, created_at
        FROM menu_items WHERE id = $1 AND company_id = $2`,
       [productId, companyId]
     );
@@ -89,7 +86,7 @@ export class ProductsService {
    */
   async getProductsByCategory(categoryId: string, companyId: string, activeOnly: boolean = true): Promise<Product[]> {
     let query = `
-      SELECT id, name, category_id, base_price, price, available as active, description, image_url, metadata, created_at
+      SELECT id, name, category_id, base_price, price, available as active, NULL as description, NULL as image_url, NULL as metadata, created_at
       FROM menu_items
       WHERE category_id = $1 AND company_id = $2
     `;
@@ -112,7 +109,7 @@ export class ProductsService {
    */
   async getActiveProducts(companyId: string): Promise<Product[]> {
     const result = await this.pool.query(
-      `SELECT id, name, category_id, base_price, price, available as active, description, image_url, metadata, created_at
+      `SELECT id, name, category_id, base_price, price, available as active, NULL as description, NULL as image_url, NULL as metadata, created_at
        FROM menu_items
        WHERE available = true AND company_id = $1
        ORDER BY name ASC`,
@@ -149,18 +146,6 @@ export class ProductsService {
       updates.push(`base_price = $${paramCount}`);
       updates.push(`price = $${paramCount}`); // Keep price in sync
       params.push(request.basePrice);
-      paramCount++;
-    }
-
-    if (request.description !== undefined) {
-      updates.push(`description = $${paramCount}`);
-      params.push(request.description);
-      paramCount++;
-    }
-
-    if (request.imageUrl !== undefined) {
-      updates.push(`image_url = $${paramCount}`);
-      params.push(request.imageUrl);
       paramCount++;
     }
 
