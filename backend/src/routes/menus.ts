@@ -74,7 +74,7 @@ router.get('/:restaurantId/:menuId', verifyToken, async (req: AuthRequest, res: 
         json_agg(json_build_object(
           'id', mi.id,
           'name', mi.name,
-          'description', NULL,
+          'description', mi.description,
           'price', mi.price,
           'basePrice', COALESCE(mi.base_price, mi.price),
           'available', mi.available,

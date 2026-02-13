@@ -189,9 +189,9 @@ export class KitchenService {
    * RULE: Only show orders with at least one item with status 'sent' (being prepared)
    * RULE: Exclude orders where all kitchen items are 'prepared' or 'served' (order complete)
    */
-  async getKitchenOrders(companyId: string, station?: 'kitchen' | 'bar'): Promise<KitchenOrder[]> {
+  async getKitchenOrders(companyId: string, stationId?: string): Promise<KitchenOrder[]> {
     // Only get items with status 'sent' or 'prepared' (not 'served')
-    const items = await this.getActiveItems(companyId, station);
+    const items = await this.getActiveItems(companyId, stationId);
 
     // Group items by order and get order creation time
     const ordersMap = new Map<string, KitchenOrder>();
@@ -244,6 +244,16 @@ export class KitchenService {
     // Sort by oldest first (highest wait time at top)
     activeOrders.sort((a, b) => {
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+
+    // DEBUG: Log notes to verify they're being returned
+    console.log('[Kitchen] Returning', activeOrders.length, 'orders');
+    activeOrders.forEach(order => {
+      order.items.forEach(item => {
+        if (item.notes) {
+          console.log(`[Kitchen] Item ${item.productName} has notes: ${item.notes}`);
+        }
+      });
     });
 
     return activeOrders;

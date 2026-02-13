@@ -67,8 +67,9 @@ router.get('/orders', verifyToken, async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    const stationId = req.query.stationId as string | undefined;
     const station = req.query.station as 'kitchen' | 'bar' | undefined;
-    const orders = await kitchenService.getKitchenOrders(companyId, station);
+    const orders = await kitchenService.getKitchenOrders(companyId, stationId || station);
     return res.json({
       orders,
       serverTime: new Date().toISOString()

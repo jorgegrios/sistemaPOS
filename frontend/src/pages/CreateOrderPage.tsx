@@ -85,6 +85,9 @@ export const CreateOrderPage: React.FC = () => {
     };
   }, []);
 
+  // Estado para el restaurante y menú (IDs reales de la base de datos)
+  const [restaurantId] = useState('5373a6e3-f661-419b-ab0a-3c5cb2913e2f');
+  const [menuId] = useState('78bdfe6d-f874-4c3f-98e8-13274c065cde');
   // Estado para modal de personalización
   const [customizationModalOpen, setCustomizationModalOpen] = useState(false);
   const [productToCustomize, setProductToCustomize] = useState<Product | null>(null);
@@ -1164,31 +1167,39 @@ export const CreateOrderPage: React.FC = () => {
                                   normalizedName === 'adicion' ||
                                   normalizedName === 'adicione' ||
                                   normalizedName.includes('adicione') ||
-                                  normalizedName.startsWith('adicione');
+                                  normalizedName.startsWith('adicione') ||
+                                  normalizedName.includes('acompa');
                               });
 
                               if (adicionesCategory) {
                                 console.log('[CreateOrderPage] ✅ Categoría "Adiciones" encontrada:', {
                                   id: adicionesCategory.id,
                                   name: adicionesCategory.name,
-                                  itemsCount: adicionesCategory.items.length,
-                                  items: adicionesCategory.items.map(i => ({ id: i.id, name: i.name }))
+                                  itemsCount: adicionesCategory.items.length
                                 });
-                                // Cambiar la vista para mostrar productos de "Adiciones"
-                                setSelectedCategoryId(adicionesCategory.id);
-                                // Guardar referencia al item del carrito para agregar adiciones
+
+                                // Convertir items de adiciones a Modifiers para el modal
+                                const modifiers = adicionesCategory.items.map(p => ({
+                                  id: p.id,
+                                  name: p.name,
+                                  priceDelta: p.basePrice,
+                                  active: p.active,
+                                  createdAt: new Date().toISOString() // Dummy date
+                                }));
+
+                                setAvailableModifiers(modifiers);
                                 setProductToCustomize(item.product);
-                                toast.info(`Selecciona las adiciones del menú (${adicionesCategory.items.length} disponibles)`);
+                                setCustomizationModalOpen(true);
+
                               } else {
                                 console.error('[CreateOrderPage] ❌ Categoría "Adiciones" NO encontrada');
-                                console.error('[CreateOrderPage] Categorías disponibles:', categories.map(c => ({ id: c.id, name: c.name, itemsCount: c.items.length })));
-                                toast.error(`Categoría "Adiciones" no encontrada. Categorías disponibles: ${categories.map(c => c.name).join(', ')}. Por favor, ejecuta el seed nuevamente.`);
+                                toast.error(`Categoría "Adiciones" no encontrada. Categorías disponibles: ${categories.map(c => c.name).join(', ')}.`);
                               }
                             }}
                             className="w-full py-1.5 px-2 bg-blue-500 text-white rounded font-semibold text-[10px] flex items-center justify-center gap-1 active:scale-95 min-h-[32px] hover:bg-blue-600 transition"
                           >
                             <span className="text-xs">➕</span>
-                            <span>Adiciones</span>
+                            <span>Personalizar</span>
                           </button>
                         </div>
 
